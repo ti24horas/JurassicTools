@@ -334,8 +334,8 @@ namespace JurassicTools
                 }
 
                 proxiedType = typeBuilder.CreateType();
-                StaticProxyCache[typeT] = proxiedType;
             }
+            StaticProxyCache[typeT] = proxiedType;
             ClrFunction proxiedInstance = (ClrFunction)Activator.CreateInstance(proxiedType, engine, name);
             engine.SetGlobalValue(name, proxiedInstance);
         }
@@ -730,6 +730,11 @@ namespace JurassicTools
                             }
                             if (value != null)
                             {
+                                
+                                if (property.property.PropertyType == typeof(string))
+                                {
+                                    value = value.ToString();
+                                }
                                 property.property.SetValue(targetObject, value, null);
                             }
                         }
