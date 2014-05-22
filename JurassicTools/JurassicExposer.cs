@@ -735,7 +735,17 @@ namespace JurassicTools
                                 {
                                     value = value.ToString();
                                 }
-                                property.property.SetValue(targetObject, value, null);
+                                try
+                                {
+                                    property.property.SetValue(targetObject, value, null);
+                                }
+                                catch(ArgumentException)
+                                {
+                                    var convertedValue = Convert.ChangeType(value, property.property.PropertyType);
+                                    property.property.SetValue(targetObject, convertedValue, null);
+
+                                }
+
                             }
                         }
                         return targetObject;
