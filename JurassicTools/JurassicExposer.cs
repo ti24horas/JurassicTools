@@ -346,6 +346,11 @@ namespace JurassicTools
             engine.SetGlobalValue(name, inst);
         }
 
+        public static object CreateInstanceObject(object instance, ScriptEngine engine)
+        {
+            return ConvertOrWrapObject(instance, engine);
+        }
+
         public static void ExposeFunction(ScriptEngine engine, Delegate dele, String name)
         {
             engine.SetGlobalValue(name, WrapDelegate(dele, engine));
