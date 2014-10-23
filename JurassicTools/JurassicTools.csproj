@@ -32,12 +32,6 @@
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
-  <PropertyGroup>
-    <SignAssembly>true</SignAssembly>
-  </PropertyGroup>
-  <PropertyGroup>
-    <AssemblyOriginatorKeyFile>jurassic.snk</AssemblyOriginatorKeyFile>
-  </PropertyGroup>
   <ItemGroup>
     <Reference Include="Jurassic, Version=2.1.0.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\..\..\packages\Jurassic.2.2.0\lib\Jurassic.dll</HintPath>
@@ -57,7 +51,6 @@
     <Compile Include="WrapperFunction.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="jurassic.snk" />
     <None Include="lib\Jurassic.dll" />
     <None Include="lib\Jurassic.pdb" />
     <None Include="packages.config" />
