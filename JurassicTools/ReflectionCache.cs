@@ -114,24 +114,22 @@ namespace JurassicTools
     ///   public static ObjectInstance WrapObject(object instance, ScriptEngine engine, params JurassicInfo[] infos)
     /// </summary>
     public static readonly MethodInfo JurassicExposer__WrapObject__Object_ScriptEngine = typeof(JurassicExposer).GetMethod("WrapObject",
-                                                                                                                           BindingFlags.Static |
+                                                                                                                           BindingFlags.Instance |
                                                                                                                            BindingFlags.Public, null,
                                                                                                                            new[]
                                                                                                                            {
-                                                                                                                             typeof(Object),
-                                                                                                                             typeof(ScriptEngine)
+                                                                                                                             typeof(Object)
                                                                                                                            }, null);
 
     /// <summary>
     ///   public static object ConvertOrWrapObject(object instance, ScriptEngine engine)
     /// </summary>
     public static readonly MethodInfo JurassicExposer__ConvertOrWrapObject__Object_ScriptEngine = typeof(JurassicExposer).GetMethod("ConvertOrWrapObject",
-                                                                                                                                    BindingFlags.Static |
+                                                                                                                                    BindingFlags.Instance |
                                                                                                                                     BindingFlags.Public, null,
                                                                                                                                     new[]
                                                                                                                                     {
-                                                                                                                                      typeof(object),
-                                                                                                                                      typeof(ScriptEngine)
+                                                                                                                                      typeof(object)
                                                                                                                                     },
                                                                                                                                     null);
 
@@ -139,7 +137,7 @@ namespace JurassicTools
     ///   public static object ConvertOrUnwrapObject(object instance, Type origType)
     /// </summary>
     public static readonly MethodInfo JurassicExposer__ConvertOrUnwrapObject__Object_Type = typeof(JurassicExposer).GetMethod("ConvertOrUnwrapObject",
-                                                                                                                                      BindingFlags.Static |
+                                                                                                                                      BindingFlags.Instance |
                                                                                                                                       BindingFlags.Public, null,
                                                                                                                                       new[]
                                                                                                                                       {
@@ -152,7 +150,7 @@ namespace JurassicTools
     ///   internal static FunctionInstance GetFunction(long index)
     /// </summary>
     public static readonly MethodInfo JurassicExposer__GetFunction__long = typeof(JurassicExposer).GetMethod("GetFunction",
-                                                                                                             BindingFlags.Static | BindingFlags.NonPublic, null,
+                                                                                                             BindingFlags.Instance | BindingFlags.NonPublic, null,
                                                                                                              new[] { typeof(long) }, null);
   }
 

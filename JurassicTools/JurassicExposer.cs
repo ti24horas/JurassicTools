@@ -16,57 +16,60 @@ namespace JurassicTools
     using System.Net.NetworkInformation;
     using System.Security.Cryptography;
 
-    public static class JurassicExposer
+    public class JurassicExposer
     {
-        private static readonly AssemblyBuilder MyAssembly;
-        private static readonly ModuleBuilder MyModule;
+        private readonly ScriptEngine engine;
 
-        private static readonly Dictionary<Type, JurassicInfo[]> TypeInfos = new Dictionary<Type, JurassicInfo[]>();
+        private readonly AssemblyBuilder MyAssembly;
+        private readonly ModuleBuilder MyModule;
 
-        private static readonly Dictionary<Type, Type> StaticProxyCache = new Dictionary<Type, Type>();
-        private static readonly Dictionary<Type, Type> InstanceProxyCache = new Dictionary<Type, Type>();
+        private readonly Dictionary<Type, JurassicInfo[]> TypeInfos = new Dictionary<Type, JurassicInfo[]>();
 
-        private static long DelegateCounter;
+        private readonly Dictionary<Type, Type> StaticProxyCache = new Dictionary<Type, Type>();
+        private readonly Dictionary<Type, Type> InstanceProxyCache = new Dictionary<Type, Type>();
 
-        private static readonly Dictionary<Tuple<Type, WeakReference>, Delegate> DelegateProxyCache = new Dictionary<Tuple<Type, WeakReference>, Delegate>();
-        private static readonly Dictionary<long, object> DelegateFunctions = new Dictionary<long, object>();
+        private long DelegateCounter;
 
-        static JurassicExposer()
+        private readonly Dictionary<Tuple<Type, WeakReference>, Delegate> DelegateProxyCache = new Dictionary<Tuple<Type, WeakReference>, Delegate>();
+        private readonly Dictionary<long, object> DelegateFunctions = new Dictionary<long, object>();
+
+        public JurassicExposer(ScriptEngine engine)
         {
+            this.engine = engine;
             AssemblyName name = new AssemblyName("JurassicProxy");
             MyAssembly = AppDomain.CurrentDomain.DefineDynamicAssembly(name, AssemblyBuilderAccess.RunAndSave);
             MyModule = MyAssembly.DefineDynamicModule("JurassicProxy.dll", "JurassicProxy.dll");
         }
 
-        public static void SaveAssembly()
+        public void SaveAssembly(string assemblyName)
         {
-            MyAssembly.Save("JurassicProxy.dll");
+            MyAssembly.Save(assemblyName);
         }
 
-        internal static object GetFunction(long index)
+        internal object GetFunction(long index)
         {
             return DelegateFunctions[index];
         }
 
-        private static long AddFunction(Type type, object function)
+        private long AddFunction(Type type, object function)
         {
             long l = Interlocked.Increment(ref DelegateCounter);
             DelegateFunctions[l] = function;
             return l;
         }
 
-        public static void RegisterInfos<T>(params JurassicInfo[] infos)
+        public void RegisterInfos<T>(params JurassicInfo[] infos)
         {
             RegisterInfos(typeof(T), infos);
         }
 
-        public static void RegisterInfos(Type typeT, params JurassicInfo[] infos)
+        public void RegisterInfos(Type typeT, params JurassicInfo[] infos)
         {
             if (TypeInfos.ContainsKey(typeT)) return;
             TypeInfos[typeT] = infos;
         }
 
-        private static JurassicInfo[] FindInfos(Type type)
+        private JurassicInfo[] FindInfos(Type type)
         {
             List<JurassicInfo> infos = new List<JurassicInfo>();
             Type t = type;
@@ -88,12 +91,12 @@ namespace JurassicTools
             return infos.ToArray();
         }
 
-        public static void ExposeClass<T>(ScriptEngine engine, String name = null)
+        public void ExposeClass<T>(String name = null)
         {
-            ExposeClass(typeof(T), engine, name);
+            ExposeClass(typeof(T), name);
         }
 
-        public static void ExposeClass(Type typeT, ScriptEngine engine, String name = null)
+        public void ExposeClass(Type typeT, String name = null)
         {
             if (name == null) name = typeT.Name;
             JurassicInfo[] infos = FindInfos(typeT);
@@ -186,7 +189,7 @@ namespace JurassicTools
                         if (!Attribute.IsDefined(miStatic, typeof(JSFunctionAttribute)) && infoAttributes.Length == 0) continue;
                         MethodBuilder proxyStatic = typeBuilder.DefineMethod(miStatic.Name, miStatic.Attributes & ~MethodAttributes.Static);
                         proxyStatic.SetReturnType(GetConvertOrWrapType(miStatic.ReturnType));
-                        proxyStatic.CopyParametersFrom(miStatic);
+                        proxyStatic.CopyParametersFrom(this, miStatic);
                         proxyStatic.CopyCustomAttributesFrom(miStatic, infoAttributes);
                         ILGenerator methodGen = proxyStatic.GetILGenerator();
 
@@ -225,7 +228,7 @@ namespace JurassicTools
                             //methodNames.Add(piStaticGet.Name);
                             MethodBuilder proxyStaticGet = typeBuilder.DefineMethod(piStaticGet.Name, piStaticGet.Attributes & ~MethodAttributes.Static);
                             proxyStaticGet.SetReturnType(GetConvertOrWrapType(piStaticGet.ReturnType));
-                            proxyStaticGet.CopyParametersFrom(piStaticGet);
+                            proxyStaticGet.CopyParametersFrom(this, piStaticGet);
                             proxyStaticGet.CopyCustomAttributesFrom(piStaticGet);
                             ILGenerator getGen = proxyStaticGet.GetILGenerator();
 
@@ -252,7 +255,7 @@ namespace JurassicTools
                             //methodNames.Add(piStaticSet.Name);
                             MethodBuilder proxyStaticSet = typeBuilder.DefineMethod(piStaticSet.Name, piStaticSet.Attributes & ~MethodAttributes.Static);
                             proxyStaticSet.SetReturnType(piStaticSet.ReturnType);
-                            proxyStaticSet.CopyParametersFrom(piStaticSet);
+                            proxyStaticSet.CopyParametersFrom(this, piStaticSet);
                             proxyStaticSet.CopyCustomAttributesFrom(piStaticSet);
                             ILGenerator setGen = proxyStaticSet.GetILGenerator();
 
@@ -289,7 +292,7 @@ namespace JurassicTools
                         string addName = eventAttribute.AddPrefix + (eventAttribute.Name ?? eventInfo.Name);
                         MethodBuilder proxyAdd = typeBuilder.DefineMethod(addName, eiAdd.Attributes & ~MethodAttributes.Static);
                         proxyAdd.SetReturnType(eiAdd.ReturnType);
-                        proxyAdd.CopyParametersFrom(eiAdd);
+                        proxyAdd.CopyParametersFrom(this, eiAdd);
                         proxyAdd.CopyCustomAttributesFrom(eiAdd, new JSFunctionAttribute());
                         ILGenerator ilAdd = proxyAdd.GetILGenerator();
                         ParameterInfo[] parameterInfos = eiAdd.GetParameters();
@@ -312,7 +315,7 @@ namespace JurassicTools
                         string removeName = eventAttribute.RemovePrefix + (eventAttribute.Name ?? eventInfo.Name);
                         MethodBuilder proxyRemove = typeBuilder.DefineMethod(removeName, eiRemove.Attributes & ~MethodAttributes.Static);
                         proxyRemove.SetReturnType(eiRemove.ReturnType);
-                        proxyRemove.CopyParametersFrom(eiRemove);
+                        proxyRemove.CopyParametersFrom(this, eiRemove);
                         proxyRemove.CopyCustomAttributesFrom(eiRemove, new JSFunctionAttribute());
                         ILGenerator ilRemove = proxyRemove.GetILGenerator();
                         parameterInfos = eiRemove.GetParameters();
@@ -340,23 +343,23 @@ namespace JurassicTools
             engine.SetGlobalValue(name, proxiedInstance);
         }
 
-        public static void ExposeInstance(ScriptEngine engine, object instance, String name)
+        public void ExposeInstance(object instance, String name)
         {
-            object inst = ConvertOrWrapObject(instance, engine);
+            object inst = ConvertOrWrapObject(instance);
             engine.SetGlobalValue(name, inst);
         }
 
-        public static object CreateInstanceObject(object instance, ScriptEngine engine)
+        public object CreateInstanceObject(object instance)
         {
-            return ConvertOrWrapObject(instance, engine);
+            return ConvertOrWrapObject(instance);
         }
 
-        public static void ExposeFunction(ScriptEngine engine, Delegate dele, String name)
+        public void ExposeFunction(Delegate dele, String name)
         {
             engine.SetGlobalValue(name, WrapDelegate(dele, engine));
         }
 
-        public static Type GetConvertOrWrapType(Type type)
+        public Type GetConvertOrWrapType(Type type)
         {
             if (type == typeof(void)) return typeof(void);
             if (type == typeof(ScriptEngine)) return typeof(ScriptEngine); // JSFunction with HasEngineParameter
@@ -407,7 +410,7 @@ namespace JurassicTools
             }
         }
 
-        public static Type GetConvertOrUnwrapType(Type type)
+        public Type GetConvertOrUnwrapType(Type type)
         {
             if (type == typeof(void)) return typeof(void);
             if (type == typeof(ConcatenatedString)) return typeof(string);
@@ -424,7 +427,7 @@ namespace JurassicTools
             throw new ArgumentException("unkown type for unwrap: " + type.FullName);
         }
 
-        public static object ConvertOrWrapObject(object instance, ScriptEngine engine)
+        public object ConvertOrWrapObject(object instance)
         {
             if (instance == null) return Undefined.Value;
             //if (instance == null) return engine.Object.InstancePrototype;
@@ -441,7 +444,7 @@ namespace JurassicTools
                 ArrayInstance arr2 = engine.Array.New();
                 for (int i = 0; i < arr.Length; i++)
                 {
-                    arr2[i] = ConvertOrWrapObject(arr.GetValue(i), engine);
+                    arr2[i] = ConvertOrWrapObject(arr.GetValue(i));
                 }
                 return arr2;
             }
@@ -496,16 +499,16 @@ namespace JurassicTools
                     IDictionary dictionary = instance as IDictionary;
                     if (dictionary != null)
                     {
-                        ObjectInstance obj = WrapObject(instance, engine);
+                        ObjectInstance obj = WrapObject(instance);
                         foreach (DictionaryEntry dictionaryEntry in dictionary)
                         {
-                            obj.SetPropertyValue(dictionaryEntry.Key.ToString(), ConvertOrWrapObject(dictionaryEntry.Value, engine), true);
+                            obj.SetPropertyValue(dictionaryEntry.Key.ToString(), ConvertOrWrapObject(dictionaryEntry.Value), true);
                         }
                         return obj;
                     }
                     if (typeof(NameValueCollection).IsAssignableFrom(type))
                     {
-                        ObjectInstance obj = WrapObject(instance, engine);
+                        ObjectInstance obj = WrapObject(instance);
                         NameValueCollection nvc = (NameValueCollection)instance;
                         foreach (var item in nvc.AllKeys)
                         {
@@ -526,7 +529,7 @@ namespace JurassicTools
                         int i = 0;
                         foreach (object item in ienum)
                         {
-                            arr.Push(ConvertOrWrapObject(item, engine));
+                            arr.Push(ConvertOrWrapObject(item));
                         }
                         return arr;
                     }
@@ -537,11 +540,11 @@ namespace JurassicTools
                         int i = 0;
                         foreach (object item in ienum)
                         {
-                            arr.Push(ConvertOrWrapObject(item, engine));
+                            arr.Push(ConvertOrWrapObject(item));
                         }
                         return arr;
                     }
-                    return WrapObject(instance, engine);
+                    return WrapObject(instance);
                 case TypeCode.SByte:
                     return (int)(sbyte)instance;
                 case TypeCode.Single:
@@ -559,7 +562,7 @@ namespace JurassicTools
             }
         }
 
-        public static object ConvertOrUnwrapObject(object instance, Type type)
+        public object ConvertOrUnwrapObject(object instance, Type type)
         {
             if (instance == null) return Null.Value;
             //Type type = instance.GetType();
@@ -735,7 +738,7 @@ namespace JurassicTools
                             }
                             if (value != null)
                             {
-                                
+
                                 if (property.property.PropertyType == typeof(string))
                                 {
                                     value = value.ToString();
@@ -744,7 +747,7 @@ namespace JurassicTools
                                 {
                                     property.property.SetValue(targetObject, value, null);
                                 }
-                                catch(ArgumentException)
+                                catch (ArgumentException)
                                 {
                                     var convertedValue = Convert.ChangeType(value, property.property.PropertyType);
                                     property.property.SetValue(targetObject, convertedValue, null);
@@ -773,7 +776,7 @@ namespace JurassicTools
             }
         }
 
-        private static Delegate UnwrapFunction(Type delegateType, FunctionInstance function)
+        private Delegate UnwrapFunction(Type delegateType, FunctionInstance function)
         {
             if (!typeof(Delegate).IsAssignableFrom(delegateType)) return null;
             MethodInfo mi = delegateType.GetMethod("Invoke");
@@ -810,12 +813,12 @@ namespace JurassicTools
             return dele;
         }
 
-        private static FunctionInstance WrapDelegate(Delegate dele, ScriptEngine engine)
+        private FunctionInstance WrapDelegate(Delegate dele, ScriptEngine engine)
         {
-            return new WrapperFunction(engine, dele);
+            return new WrapperFunction(this, engine, dele);
         }
 
-        private static void EmitConvertOrWrap(ILGenerator gen, Type type, LocalBuilder localFunction = null)
+        private void EmitConvertOrWrap(ILGenerator gen, Type type, LocalBuilder localFunction = null)
         {
             if (type == typeof(void)) return;
             // > value (from caller)
@@ -831,7 +834,7 @@ namespace JurassicTools
             if (convertOrWrapType.IsValueType) gen.Emit(OpCodes.Unbox_Any, convertOrWrapType);
         }
 
-        private static void EmitConvertOrUnwrap(ILGenerator gen, Type type)
+        private void EmitConvertOrUnwrap(ILGenerator gen, Type type)
         {
             if (type == typeof(void)) return;
             // > value (from caller)
@@ -859,7 +862,7 @@ namespace JurassicTools
             if (type.IsValueType) gen.Emit(OpCodes.Unbox_Any, type);
         }
 
-        public static ObjectInstance WrapObject(object instance, ScriptEngine engine)
+        public ObjectInstance WrapObject(object instance)
         {
             Type type = instance.GetType();
             JurassicInfo[] infos = FindInfos(type);
@@ -906,7 +909,7 @@ namespace JurassicTools
                     if (!Attribute.IsDefined(miInst, typeof(JSFunctionAttribute)) && infoAttributes.Length == 0) continue;
                     MethodBuilder proxyInst = typeBuilder.DefineMethod(miInst.Name, miInst.Attributes);
                     proxyInst.SetReturnType(GetConvertOrWrapType(miInst.ReturnType));
-                    proxyInst.CopyParametersFrom(miInst);
+                    proxyInst.CopyParametersFrom(this, miInst);
                     proxyInst.CopyCustomAttributesFrom(miInst, infoAttributes);
                     ILGenerator methodGen = proxyInst.GetILGenerator();
 
@@ -939,7 +942,7 @@ namespace JurassicTools
                         //methodNames.Add(piInstGet.Name);
                         MethodBuilder proxyInstanceGet = typeBuilder.DefineMethod(piInstGet.Name, piInstGet.Attributes);
                         proxyInstanceGet.SetReturnType(GetConvertOrWrapType(piInstGet.ReturnType));
-                        proxyInstanceGet.CopyParametersFrom(piInstGet);
+                        proxyInstanceGet.CopyParametersFrom(this, piInstGet);
                         proxyInstanceGet.CopyCustomAttributesFrom(piInstGet);
                         ILGenerator getGen = proxyInstanceGet.GetILGenerator();
 
@@ -961,7 +964,7 @@ namespace JurassicTools
                         //methodNames.Add(piInstSet.Name);
                         MethodBuilder proxyInstanceSet = typeBuilder.DefineMethod(piInstSet.Name, piInstSet.Attributes);
                         proxyInstanceSet.SetReturnType(piInstSet.ReturnType);
-                        proxyInstanceSet.CopyParametersFrom(piInstSet);
+                        proxyInstanceSet.CopyParametersFrom(this, piInstSet);
                         proxyInstanceSet.CopyCustomAttributesFrom(piInstSet);
                         ILGenerator setGen = proxyInstanceSet.GetILGenerator();
 
@@ -992,7 +995,7 @@ namespace JurassicTools
                     string addName = eventAttribute.AddPrefix + (eventAttribute.Name ?? eventInfo.Name);
                     MethodBuilder proxyAdd = typeBuilder.DefineMethod(addName, eiAdd.Attributes);
                     proxyAdd.SetReturnType(eiAdd.ReturnType);
-                    proxyAdd.CopyParametersFrom(eiAdd);
+                    proxyAdd.CopyParametersFrom(this, eiAdd);
                     proxyAdd.CopyCustomAttributesFrom(eiAdd, new JSFunctionAttribute());
                     ILGenerator ilAdd = proxyAdd.GetILGenerator();
                     ilAdd.Emit(OpCodes.Ldarg_0); // # this
@@ -1010,7 +1013,7 @@ namespace JurassicTools
                     string removeName = eventAttribute.RemovePrefix + (eventAttribute.Name ?? eventInfo.Name);
                     MethodBuilder proxyRemove = typeBuilder.DefineMethod(removeName, eiRemove.Attributes);
                     proxyRemove.SetReturnType(eiRemove.ReturnType);
-                    proxyRemove.CopyParametersFrom(eiRemove);
+                    proxyRemove.CopyParametersFrom(this, eiRemove);
                     proxyRemove.CopyCustomAttributesFrom(eiRemove, new JSFunctionAttribute());
                     ILGenerator ilRemove = proxyRemove.GetILGenerator();
                     ilRemove.Emit(OpCodes.Ldarg_0); // # this
@@ -1029,7 +1032,7 @@ namespace JurassicTools
                 InstanceProxyCache[type] = proxiedType;
             }
 
-            ObjectInstance proxiedInstance = (ObjectInstance)Activator.CreateInstance(proxiedType, engine, instance);
+            ObjectInstance proxiedInstance = (ObjectInstance)Activator.CreateInstance(proxiedType, this.engine, instance);
             return proxiedInstance;
         }
 
