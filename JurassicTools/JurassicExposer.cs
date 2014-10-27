@@ -33,17 +33,17 @@ namespace JurassicTools
         private readonly Dictionary<Tuple<Type, WeakReference>, Delegate> DelegateProxyCache = new Dictionary<Tuple<Type, WeakReference>, Delegate>();
         private readonly Dictionary<long, object> DelegateFunctions = new Dictionary<long, object>();
 
-        public JurassicExposer(ScriptEngine engine)
+        public JurassicExposer(ScriptEngine engine, string assemblyName)
         {
             this.engine = engine;
-            AssemblyName name = new AssemblyName("JurassicProxy");
+            AssemblyName name = new AssemblyName(assemblyName);
             MyAssembly = AppDomain.CurrentDomain.DefineDynamicAssembly(name, AssemblyBuilderAccess.RunAndSave);
-            MyModule = MyAssembly.DefineDynamicModule("JurassicProxy.dll", "JurassicProxy.dll");
+            MyModule = MyAssembly.DefineDynamicModule(string.Format("{0}.dll", assemblyName), string.Format("{0}.dll", assemblyName));
         }
 
-        public void SaveAssembly(string assemblyName)
+        public void SaveAssembly()
         {
-            MyAssembly.Save(assemblyName);
+            MyAssembly.Save(MyAssembly.GetName().Name + ".dll");
         }
 
         internal object GetFunction(long index)
@@ -90,258 +90,12 @@ namespace JurassicTools
             }
             return infos.ToArray();
         }
-
+        /*
         public void ExposeClass<T>(String name = null)
         {
             ExposeClass(typeof(T), name);
         }
-
-        public void ExposeClass(Type typeT, String name = null)
-        {
-            if (name == null) name = typeT.Name;
-            JurassicInfo[] infos = FindInfos(typeT);
-
-            Type proxiedType;
-            if (!StaticProxyCache.TryGetValue(typeT, out proxiedType))
-            {
-                // public class JurassicStaticProxy.T : ClrFunction
-                TypeBuilder typeBuilder = MyModule.DefineType("JurassicStaticProxy." + typeT.FullName, TypeAttributes.Class | TypeAttributes.Public,
-                                                               typeof(ClrFunction));
-
-                // public .ctor(ScriptEngine engine, plainString name)
-                // : base(engine.Function.InstancePrototype, name, engine.Object)
-                // base.PopulateFunctions(null, BindingFlags.Public | BindingFlags.Static /*| BindingFlags.DeclaredOnly*/);
-                // base.PopulateFields(null);
-                ConstructorBuilder ctorBuilder = typeBuilder.DefineConstructor(MethodAttributes.Public | MethodAttributes.HideBySig, CallingConventions.HasThis,
-                                                                               new[] { typeof(ScriptEngine), typeof(string) });
-                ILGenerator ctorGen = ctorBuilder.GetILGenerator();
-
-                ctorGen.Emit(OpCodes.Ldarg_0); // # this
-                ctorGen.Emit(OpCodes.Ldarg_1); // > engine
-                ctorGen.Emit(OpCodes.Callvirt, ReflectionCache.ScriptEngine__get_Function); // > <.Function
-                ctorGen.Emit(OpCodes.Callvirt, ReflectionCache.FunctionInstance__get_InstancePrototype); // > <.InstancePrototype
-                ctorGen.Emit(OpCodes.Ldarg_2); // > name
-                ctorGen.Emit(OpCodes.Ldarg_1); // > engine
-                ctorGen.Emit(OpCodes.Callvirt, ReflectionCache.ScriptEngine__get_Object); // > <.Object
-                ctorGen.Emit(OpCodes.Call, ReflectionCache.ClrFunction__ctor__ObjectInstance_String_ObjectInstance); // #:base(<, <, <)
-                ctorGen.Emit(OpCodes.Ldarg_0); // # this
-                ctorGen.Emit(OpCodes.Ldtoken, typeBuilder); // __this__
-                ctorGen.Emit(OpCodes.Call, ReflectionCache.Type__GetTypeFromHandle__RuntimeTypeHandle); // > typeof(__this__)
-                ctorGen.Emit(OpCodes.Ldc_I4, (int)(BindingFlags.Public /**/| BindingFlags.Static/**/ | BindingFlags.Instance /*| BindingFlags.DeclaredOnly*/)); // > flags
-                ctorGen.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__PopulateFunctions__Type_BindingFlags); // #.PopulateFunctions(<, <)
-                ctorGen.Emit(OpCodes.Ldarg_0); // # this
-                ctorGen.Emit(OpCodes.Ldnull); // > null
-                ctorGen.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__PopulateFields__Type); // #.PopulateFields(<)
-                ctorGen.Emit(OpCodes.Ret);
-
-                if (typeT.IsEnum)
-                {
-                    if (Attribute.IsDefined(typeT, typeof(FlagsAttribute)))
-                    {
-                        Type enumType = Enum.GetUnderlyingType(typeT);
-                        foreach (string v in Enum.GetNames(typeT))
-                        {
-                            FieldBuilder field = typeBuilder.DefineField(v, enumType, FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.Literal);
-                            field.SetConstant(Convert.ChangeType(Enum.Parse(typeT, v), enumType));
-                            field.SetCustomAttribute(new CustomAttributeBuilder(ReflectionCache.JSField__ctor, new object[] { }));
-                        }
-                    }
-                    else
-                    {
-                        foreach (string v in Enum.GetNames(typeT))
-                        {
-                            FieldBuilder field = typeBuilder.DefineField(v, typeof(string), FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.Literal);
-                            field.SetConstant(v);
-                            field.SetCustomAttribute(new CustomAttributeBuilder(ReflectionCache.JSField__ctor, new object[] { }));
-                        }
-                    }
-                }
-                else
-                {
-                    // [JsConstructorFunction]
-                    // public ObjectInstance Construct(params object[] args)
-                    // return JurassicExposer.WrapObject(Activator.CreateInstance(typeof(T), args), Engine);
-                    MethodBuilder jsctorBuilder = typeBuilder.DefineMethod("Construct", MethodAttributes.Public | MethodAttributes.HideBySig, CallingConventions.HasThis,
-                                                                           typeof(ObjectInstance), new[] { typeof(Object[]) });
-                    jsctorBuilder.SetCustomAttribute(new CustomAttributeBuilder(ReflectionCache.JSConstructorFunctionAttribute__ctor, new object[] { }));
-                    ParameterBuilder jsctorParams = jsctorBuilder.DefineParameter(1, ParameterAttributes.None, "args");
-                    jsctorParams.SetCustomAttribute(new CustomAttributeBuilder(ReflectionCache.ParamArrayAttribute__ctor, new object[] { }));
-                    ILGenerator jsctorGen = jsctorBuilder.GetILGenerator();
-
-                    jsctorGen.Emit(OpCodes.Ldtoken, typeT); // T
-                    jsctorGen.Emit(OpCodes.Call, ReflectionCache.Type__GetTypeFromHandle__RuntimeTypeHandle); // > typeof(T)
-                    jsctorGen.Emit(OpCodes.Ldarg_1); // > args
-                    jsctorGen.Emit(OpCodes.Call, ReflectionCache.Activator__CreateInstance__Type_aObject); // > Activator.CreateInstance(<, <)
-                    jsctorGen.Emit(OpCodes.Ldarg_0); // # this
-                    jsctorGen.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__get_Engine); // > #.Engine
-                    jsctorGen.Emit(OpCodes.Call, ReflectionCache.JurassicExposer__WrapObject__Object_ScriptEngine); // > JurassicExposer.WrapObject(<, <)
-                    jsctorGen.Emit(OpCodes.Ret);
-
-                    // public ... Method(...)
-                    // !converting static method to instance method!
-                    MethodInfo[] miStatics = typeT.GetMethods(BindingFlags.Public | BindingFlags.Static /*| BindingFlags.DeclaredOnly*/);
-                    List<String> methodNames = new List<string>();
-                    foreach (MethodInfo miStatic in miStatics)
-                    {
-                        if (methodNames.Contains(miStatic.Name)) continue;
-                        else methodNames.Add(miStatic.Name);
-                        Attribute[] infoAttributes = GetAttributes(infos, miStatic.Name, typeof(JSFunctionAttribute));
-                        if (!Attribute.IsDefined(miStatic, typeof(JSFunctionAttribute)) && infoAttributes.Length == 0) continue;
-                        MethodBuilder proxyStatic = typeBuilder.DefineMethod(miStatic.Name, miStatic.Attributes & ~MethodAttributes.Static);
-                        proxyStatic.SetReturnType(GetConvertOrWrapType(miStatic.ReturnType));
-                        proxyStatic.CopyParametersFrom(this, miStatic);
-                        proxyStatic.CopyCustomAttributesFrom(miStatic, infoAttributes);
-                        ILGenerator methodGen = proxyStatic.GetILGenerator();
-
-                        ParameterInfo[] parameterInfos = miStatic.GetParameters();
-                        JSFunctionAttribute attr = Attribute.GetCustomAttribute(miStatic, typeof(JSFunctionAttribute)) as JSFunctionAttribute;
-                        if (attr != null && attr.Flags.HasFlag(JSFunctionFlags.HasEngineParameter))
-                        {
-                            parameterInfos = parameterInfos.Skip(1).ToArray();
-                            methodGen.Emit(OpCodes.Ldarg, 0); // > [this]
-                            methodGen.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__get_Engine); // > <[this].Engine
-                        }
-                        for (int i = 0; i < parameterInfos.Length; i++)
-                        {
-                            methodGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrUnwrap(methodGen, parameterInfos[i].ParameterType);
-                        }
-                        methodGen.Emit(miStatic.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, miStatic); // >? Method(<*)
-                        EmitConvertOrWrap(methodGen, miStatic.ReturnType);
-                        methodGen.Emit(OpCodes.Ret);
-                    }
-
-                    // public ... Property
-                    // !converting static accessors to instance accessors!
-                    PropertyInfo[] piStatics = typeT.GetProperties(BindingFlags.Public | BindingFlags.Static /*| BindingFlags.DeclaredOnly*/);
-                    foreach (PropertyInfo piStatic in piStatics)
-                    {
-                        Attribute[] infoAttributes = GetAttributes(infos, piStatic.Name, typeof(JSPropertyAttribute));
-                        if (!Attribute.IsDefined(piStatic, typeof(JSPropertyAttribute)) && infoAttributes.Length == 0) continue;
-                        MethodInfo piStaticGet = piStatic.GetGetMethod();
-                        MethodInfo piStaticSet = piStatic.GetSetMethod();
-                        if (piStaticGet == null && piStaticSet == null) continue;
-                        PropertyBuilder proxyStatic = typeBuilder.DefineProperty(piStatic.Name, piStatic.Attributes, GetConvertOrWrapType(piStatic.PropertyType), null);
-                        proxyStatic.CopyCustomAttributesFrom(piStatic, infoAttributes);
-                        if (piStaticGet != null /*&& !methodNames.Contains(piStaticGet.Name)*/)
-                        {
-                            //methodNames.Add(piStaticGet.Name);
-                            MethodBuilder proxyStaticGet = typeBuilder.DefineMethod(piStaticGet.Name, piStaticGet.Attributes & ~MethodAttributes.Static);
-                            proxyStaticGet.SetReturnType(GetConvertOrWrapType(piStaticGet.ReturnType));
-                            proxyStaticGet.CopyParametersFrom(this, piStaticGet);
-                            proxyStaticGet.CopyCustomAttributesFrom(piStaticGet);
-                            ILGenerator getGen = proxyStaticGet.GetILGenerator();
-
-                            ParameterInfo[] parameterInfos = piStaticGet.GetParameters();
-                            JSFunctionAttribute attr = Attribute.GetCustomAttribute(piStaticGet, typeof(JSFunctionAttribute)) as JSFunctionAttribute;
-                            if (attr != null && attr.Flags.HasFlag(JSFunctionFlags.HasEngineParameter))
-                            {
-                                parameterInfos = parameterInfos.Skip(1).ToArray();
-                                getGen.Emit(OpCodes.Ldarg, 0); // > [this]
-                                getGen.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__get_Engine); // > <[this].Engine
-                            }
-                            for (int i = 0; i < parameterInfos.Length; i++)
-                            {
-                                getGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                                if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrUnwrap(getGen, parameterInfos[i].ParameterType);
-                            }
-                            getGen.Emit(piStaticGet.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, piStaticGet); // > Property <*
-                            EmitConvertOrWrap(getGen, piStaticGet.ReturnType);
-                            getGen.Emit(OpCodes.Ret);
-                            proxyStatic.SetGetMethod(proxyStaticGet);
-                        }
-                        if (piStaticSet != null /*&& !methodNames.Contains(piStaticSet.Name)*/)
-                        {
-                            //methodNames.Add(piStaticSet.Name);
-                            MethodBuilder proxyStaticSet = typeBuilder.DefineMethod(piStaticSet.Name, piStaticSet.Attributes & ~MethodAttributes.Static);
-                            proxyStaticSet.SetReturnType(piStaticSet.ReturnType);
-                            proxyStaticSet.CopyParametersFrom(this, piStaticSet);
-                            proxyStaticSet.CopyCustomAttributesFrom(piStaticSet);
-                            ILGenerator setGen = proxyStaticSet.GetILGenerator();
-
-                            ParameterInfo[] parameterInfos = piStaticSet.GetParameters();
-                            JSFunctionAttribute attr = Attribute.GetCustomAttribute(piStaticSet, typeof(JSFunctionAttribute)) as JSFunctionAttribute;
-                            if (attr != null && attr.Flags.HasFlag(JSFunctionFlags.HasEngineParameter))
-                            {
-                                parameterInfos = parameterInfos.Skip(1).ToArray();
-                                setGen.Emit(OpCodes.Ldarg, 0); // > [this]
-                                setGen.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__get_Engine); // > <[this].Engine
-                            }
-                            for (int i = 0; i < parameterInfos.Length; i++)
-                            {
-                                setGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                                if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrUnwrap(setGen, parameterInfos[i].ParameterType);
-                            }
-                            setGen.Emit(piStaticSet.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, piStaticSet); // Property = <*
-                            setGen.Emit(OpCodes.Ret);
-                            proxyStatic.SetSetMethod(proxyStaticSet);
-                        }
-                    }
-
-                    // public event ...
-                    // !converting static methods to instance methods!
-                    EventInfo[] eiStatics = typeT.GetEvents(BindingFlags.Public | BindingFlags.Static /*| BindingFlags.DeclaredOnly*/);
-                    foreach (EventInfo eventInfo in eiStatics)
-                    {
-                        Attribute[] infoAttributes = GetAttributes(infos, eventInfo.Name, typeof(JSEventAttribute));
-                        if (!Attribute.IsDefined(eventInfo, typeof(JSEventAttribute)) && infoAttributes.Length == 0) continue;
-                        JSEventAttribute eventAttribute = (JSEventAttribute)Attribute.GetCustomAttribute(eventInfo, typeof(JSEventAttribute));
-                        if (eventAttribute == null) eventAttribute = (JSEventAttribute)infoAttributes.FirstOrDefault(a => a is JSEventAttribute);
-                        MethodInfo eiAdd = eventInfo.GetAddMethod();
-                        if (eventAttribute == null) eventAttribute = new JSEventAttribute();
-                        string addName = eventAttribute.AddPrefix + (eventAttribute.Name ?? eventInfo.Name);
-                        MethodBuilder proxyAdd = typeBuilder.DefineMethod(addName, eiAdd.Attributes & ~MethodAttributes.Static);
-                        proxyAdd.SetReturnType(eiAdd.ReturnType);
-                        proxyAdd.CopyParametersFrom(this, eiAdd);
-                        proxyAdd.CopyCustomAttributesFrom(eiAdd, new JSFunctionAttribute());
-                        ILGenerator ilAdd = proxyAdd.GetILGenerator();
-                        ParameterInfo[] parameterInfos = eiAdd.GetParameters();
-                        JSFunctionAttribute attr = Attribute.GetCustomAttribute(eiAdd, typeof(JSFunctionAttribute)) as JSFunctionAttribute;
-                        if (attr != null && attr.Flags.HasFlag(JSFunctionFlags.HasEngineParameter))
-                        {
-                            parameterInfos = parameterInfos.Skip(1).ToArray();
-                            ilAdd.Emit(OpCodes.Ldarg, 0); // > [this]
-                            ilAdd.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__get_Engine); // > <[this].Engine
-                        }
-                        for (int i = 0; i < parameterInfos.Length; i++)
-                        {
-                            ilAdd.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrUnwrap(ilAdd, parameterInfos[i].ParameterType);
-                        }
-                        ilAdd.Emit(eiAdd.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, eiAdd);
-                        ilAdd.Emit(OpCodes.Ret);
-
-                        MethodInfo eiRemove = eventInfo.GetRemoveMethod();
-                        string removeName = eventAttribute.RemovePrefix + (eventAttribute.Name ?? eventInfo.Name);
-                        MethodBuilder proxyRemove = typeBuilder.DefineMethod(removeName, eiRemove.Attributes & ~MethodAttributes.Static);
-                        proxyRemove.SetReturnType(eiRemove.ReturnType);
-                        proxyRemove.CopyParametersFrom(this, eiRemove);
-                        proxyRemove.CopyCustomAttributesFrom(eiRemove, new JSFunctionAttribute());
-                        ILGenerator ilRemove = proxyRemove.GetILGenerator();
-                        parameterInfos = eiRemove.GetParameters();
-                        attr = Attribute.GetCustomAttribute(eiRemove, typeof(JSFunctionAttribute)) as JSFunctionAttribute;
-                        if (attr != null && attr.Flags.HasFlag(JSFunctionFlags.HasEngineParameter))
-                        {
-                            parameterInfos = parameterInfos.Skip(1).ToArray();
-                            ilRemove.Emit(OpCodes.Ldarg, 0); // > [this]
-                            ilRemove.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__get_Engine); // > <[this].Engine
-                        }
-                        for (int i = 0; i < parameterInfos.Length; i++)
-                        {
-                            ilRemove.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrUnwrap(ilRemove, parameterInfos[i].ParameterType);
-                        }
-                        ilRemove.Emit(eiRemove.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, eiRemove);
-                        ilRemove.Emit(OpCodes.Ret);
-                    }
-                }
-
-                proxiedType = typeBuilder.CreateType();
-            }
-            StaticProxyCache[typeT] = proxiedType;
-            ClrFunction proxiedInstance = (ClrFunction)Activator.CreateInstance(proxiedType, engine, name);
-            engine.SetGlobalValue(name, proxiedInstance);
-        }
+        */
 
         public void ExposeInstance(object instance, String name)
         {
@@ -352,11 +106,6 @@ namespace JurassicTools
         public object CreateInstanceObject(object instance)
         {
             return ConvertOrWrapObject(instance);
-        }
-
-        public void ExposeFunction(Delegate dele, String name)
-        {
-            engine.SetGlobalValue(name, WrapDelegate(dele, engine));
         }
 
         public Type GetConvertOrWrapType(Type type)
@@ -799,7 +548,7 @@ namespace JurassicTools
                 il.Emit(OpCodes.Ldloc, par); // >par
                 il.Emit(OpCodes.Ldc_I4, i); // >i
                 il.Emit(OpCodes.Ldarg, i); // > arg*
-                if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrWrap(il, parameterInfos[i].ParameterType, localFunction);
+                if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrWrap(il, parameterInfos[i].ParameterType, null, localFunction);
                 if (parameterInfos[i].ParameterType.IsValueType) il.Emit(OpCodes.Box, parameterInfos[i].ParameterType);
                 il.Emit(OpCodes.Stelem_Ref); // <par[<i] = <
             }
@@ -807,18 +556,13 @@ namespace JurassicTools
             il.Emit(OpCodes.Ldloc, par); // >par
             il.Emit(OpCodes.Callvirt, ReflectionCache.FunctionInstance__CallLateBound__Object_aObject); // >? <localFunction.CallLateBound(<[thisObject], <par)
             if (mi.ReturnType == typeof(void)) il.Emit(OpCodes.Pop);
-            else EmitConvertOrWrap(il, mi.ReturnType);
+            else EmitConvertOrWrap(il, mi.ReturnType, null);
             il.Emit(OpCodes.Ret);
             Delegate dele = dm.CreateDelegate(delegateType);
             return dele;
         }
 
-        private FunctionInstance WrapDelegate(Delegate dele, ScriptEngine engine)
-        {
-            return new WrapperFunction(this, engine, dele);
-        }
-
-        private void EmitConvertOrWrap(ILGenerator gen, Type type, LocalBuilder localFunction = null)
+        private void EmitConvertOrWrap(ILGenerator gen, Type type, FieldBuilder fldExposer, LocalBuilder localFunction = null)
         {
             if (type == typeof(void)) return;
             // > value (from caller)
@@ -826,20 +570,27 @@ namespace JurassicTools
             {
                 gen.Emit(OpCodes.Box, type);
             }
-            if (localFunction == null) gen.Emit(OpCodes.Ldarg_0); // >[this]
+            if (localFunction == null)
+            {
+            }
             else gen.Emit(OpCodes.Ldloc, localFunction); // >localFunction
-            gen.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__get_Engine); // > <[this].Engine
-            gen.Emit(OpCodes.Call, ReflectionCache.JurassicExposer__ConvertOrWrapObject__Object_ScriptEngine); // JurassicExposer.ConvertOrWrapObject(<, <, <)
+            
+            gen.Emit(OpCodes.Callvirt, ReflectionCache.JurassicExposer__ConvertOrWrapObject__Object_ScriptEngine); // JurassicExposer.ConvertOrWrapObject(<, <, <)
             Type convertOrWrapType = GetConvertOrWrapType(type);
             if (convertOrWrapType.IsValueType) gen.Emit(OpCodes.Unbox_Any, convertOrWrapType);
         }
 
-        private void EmitConvertOrUnwrap(ILGenerator gen, Type type)
+        private void EmitConvertOrUnwrap(ILGenerator gen, int parameterIndex, FieldInfo exposer, Type type)
         {
             if (type == typeof(void)) return;
+
             // > value (from caller)
-            //Type convertOrWrapType = GetConvertOrWrapType(type);
+            Type convertOrWrapType = GetConvertOrWrapType(type);
             //if (convertOrWrapType.IsValueType) gen.Emit(OpCodes.Box, convertOrWrapType);
+            gen.Emit(OpCodes.Ldarg_0);
+            gen.Emit(OpCodes.Ldfld, exposer);
+            gen.Emit(OpCodes.Ldarg, parameterIndex + 1);
+            
             if (type.IsValueType)
             {
                 if (type.IsEnum)
@@ -854,12 +605,21 @@ namespace JurassicTools
                     gen.Emit(OpCodes.Box, type); // why? bugs!
                 }
             }
+            
             Type realType = type;
             if (type.IsByRef || type.IsPointer) realType = type.GetElementType();
             gen.Emit(OpCodes.Ldtoken, realType); // > type
+
             gen.Emit(OpCodes.Call, ReflectionCache.Type__GetTypeFromHandle__RuntimeTypeHandle); // > typeof(<)
-            gen.Emit(OpCodes.Call, ReflectionCache.JurassicExposer__ConvertOrUnwrapObject__Object_Type); // JurassicExposer.ConvertOrUnwrapObject(<, <)
+
+            gen.Emit(OpCodes.Callvirt, ReflectionCache.JurassicExposer__ConvertOrUnwrapObject__Object_Static); // JurassicExposer.ConvertOrUnwrapObject(<, <)
             if (type.IsValueType) gen.Emit(OpCodes.Unbox_Any, type);
+        }
+
+        public object ConvertObject(object instance, Type type)
+        {
+            return ConvertOrUnwrapObject(instance, type);
+            return instance;
         }
 
         public ObjectInstance WrapObject(object instance)
@@ -875,14 +635,15 @@ namespace JurassicTools
                                                                typeof(ObjectInstance));
 
                 // public object realInstance
-                FieldBuilder fldInstance = typeBuilder.DefineField("realInstance", typeof(object), FieldAttributes.Public);
+                FieldBuilder fldInstance = typeBuilder.DefineField("realInstance", instance.GetType(), FieldAttributes.Private);
+                var fieldExposer = typeBuilder.DefineField("exposer", typeof(JurassicExposer), FieldAttributes.Private);
 
                 // .ctor(ScriptEngine engine, object instance)
                 // : base(engine)
                 // base.PopulateFunctions(typeof(__this__), BindingFlags.Public | BindingFlags.Instance /*| BindingFlags.DeclaredOnly*/);
                 // realInstance = instance;
                 ConstructorBuilder ctorBuilder = typeBuilder.DefineConstructor(MethodAttributes.Public | MethodAttributes.HideBySig, CallingConventions.HasThis,
-                                                                               new[] { typeof(ScriptEngine), typeof(object) });
+                                                                               new[] { typeof(ScriptEngine), typeof(JurassicExposer), instance.GetType() });
                 ILGenerator ctorGen = ctorBuilder.GetILGenerator();
 
                 ctorGen.Emit(OpCodes.Ldarg_0); // # this
@@ -893,8 +654,12 @@ namespace JurassicTools
                 ctorGen.Emit(OpCodes.Call, ReflectionCache.Type__GetTypeFromHandle__RuntimeTypeHandle); // > typeof(<[__this__])
                 ctorGen.Emit(OpCodes.Ldc_I4, (int)(BindingFlags.Public | BindingFlags.Instance /*| BindingFlags.DeclaredOnly*/)); // > flags
                 ctorGen.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__PopulateFunctions__Type_BindingFlags); // #.PopulateFunctions(<, <);
+                ctorGen.Emit(OpCodes.Ldarg_0);
+                ctorGen.Emit(OpCodes.Ldarg_2);
+                ctorGen.Emit(OpCodes.Stfld, fieldExposer); // #.realInstance = <
+
                 ctorGen.Emit(OpCodes.Ldarg_0); // # this
-                ctorGen.Emit(OpCodes.Ldarg_2); // > instance
+                ctorGen.Emit(OpCodes.Ldarg_3); // > instance
                 ctorGen.Emit(OpCodes.Stfld, fldInstance); // #.realInstance = <
                 ctorGen.Emit(OpCodes.Ret);
 
@@ -903,6 +668,7 @@ namespace JurassicTools
                 List<string> methodNames = new List<string>();
                 foreach (MethodInfo miInst in miInsts)
                 {
+                    
                     if (methodNames.Contains(miInst.Name)) continue;
                     else methodNames.Add(miInst.Name);
                     Attribute[] infoAttributes = GetAttributes(infos, miInst.Name, typeof(JSFunctionAttribute));
@@ -913,16 +679,22 @@ namespace JurassicTools
                     proxyInst.CopyCustomAttributesFrom(miInst, infoAttributes);
                     ILGenerator methodGen = proxyInst.GetILGenerator();
 
-                    methodGen.Emit(OpCodes.Ldarg_0); // # this
-                    methodGen.Emit(OpCodes.Ldfld, fldInstance); // > #.realInstance
                     ParameterInfo[] parameterInfos = miInst.GetParameters();
+                    if (miInst.ReturnType != typeof(void))
+                    {
+                        methodGen.Emit(OpCodes.Ldarg_0);
+                        methodGen.Emit(OpCodes.Ldfld, fieldExposer);
+                    }
+                    methodGen.Emit(OpCodes.Ldarg_0);
+                    methodGen.Emit(OpCodes.Ldfld, fldInstance);
                     for (int i = 0; i < parameterInfos.Length; i++)
                     {
-                        methodGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrUnwrap(methodGen, parameterInfos[i].ParameterType);
+                        //methodGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
+                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(methodGen, i, fieldExposer, parameterInfos[i].ParameterType);
                     }
                     methodGen.Emit(miInst.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, miInst); // >? <.Method(<*)
-                    EmitConvertOrWrap(methodGen, miInst.ReturnType);
+
+                    EmitConvertOrWrap(methodGen, miInst.ReturnType, fieldExposer);
                     methodGen.Emit(OpCodes.Ret);
                 }
 
@@ -951,11 +723,11 @@ namespace JurassicTools
                         ParameterInfo[] parameterInfos = piInstGet.GetParameters();
                         for (int i = 0; i < parameterInfos.Length; i++)
                         {
-                            getGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrUnwrap(getGen, parameterInfos[i].ParameterType);
+                            //getGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
+                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(getGen, i, fieldExposer, parameterInfos[i].ParameterType);
                         }
                         getGen.Emit(piInstGet.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, piInstGet); // <.Property <*
-                        EmitConvertOrWrap(getGen, piInstGet.ReturnType);
+                        EmitConvertOrWrap(getGen, piInstGet.ReturnType, fieldExposer);
                         getGen.Emit(OpCodes.Ret);
                         proxyInstance.SetGetMethod(proxyInstanceGet);
                     }
@@ -973,8 +745,8 @@ namespace JurassicTools
                         ParameterInfo[] parameterInfos = piInstSet.GetParameters();
                         for (int i = 0; i < parameterInfos.Length; i++)
                         {
-                            setGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrUnwrap(setGen, parameterInfos[i].ParameterType);
+                            //setGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
+                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(setGen, i, fieldExposer, parameterInfos[i].ParameterType);
                         }
                         setGen.Emit(piInstSet.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, piInstSet); // <.Property = <*
                         setGen.Emit(OpCodes.Ret);
@@ -1003,8 +775,8 @@ namespace JurassicTools
                     ParameterInfo[] parameterInfos = eiAdd.GetParameters();
                     for (int i = 0; i < parameterInfos.Length; i++)
                     {
-                        ilAdd.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrUnwrap(ilAdd, parameterInfos[i].ParameterType);
+                        //ilAdd.Emit(OpCodes.Ldarg, i + 1); // > arg*
+                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(ilAdd, i, fieldExposer, parameterInfos[i].ParameterType);
                     }
                     ilAdd.Emit(eiAdd.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, eiAdd);
                     ilAdd.Emit(OpCodes.Ret);
@@ -1021,8 +793,8 @@ namespace JurassicTools
                     parameterInfos = eiRemove.GetParameters();
                     for (int i = 0; i < parameterInfos.Length; i++)
                     {
-                        ilRemove.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrUnwrap(ilRemove, parameterInfos[i].ParameterType);
+                        //ilRemove.Emit(OpCodes.Ldarg, i + 1); // > arg*
+                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(ilRemove, i, fieldExposer, parameterInfos[i].ParameterType);
                     }
                     ilRemove.Emit(eiRemove.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, eiRemove);
                     ilRemove.Emit(OpCodes.Ret);
@@ -1032,7 +804,7 @@ namespace JurassicTools
                 InstanceProxyCache[type] = proxiedType;
             }
 
-            ObjectInstance proxiedInstance = (ObjectInstance)Activator.CreateInstance(proxiedType, this.engine, instance);
+            ObjectInstance proxiedInstance = (ObjectInstance)Activator.CreateInstance(proxiedType, this.engine, this, instance);
             return proxiedInstance;
         }
 

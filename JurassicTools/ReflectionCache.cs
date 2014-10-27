@@ -146,6 +146,12 @@ namespace JurassicTools
                                                                                                                                       },
                                                                                                                                       null);
 
+    public static readonly MethodInfo JurassicExposer__ConvertOrUnwrapObject__Object_Static = typeof(JurassicExposer).GetMethod("ConvertObject",
+                                                                                                                                    BindingFlags.Instance |
+                                                                                                                                    BindingFlags.Public, null,
+                                                                                                                                    new[] { typeof(object), typeof(Type) },
+                                                                                                                                    null);
+
     /// <summary>
     ///   internal static FunctionInstance GetFunction(long index)
     /// </summary>
