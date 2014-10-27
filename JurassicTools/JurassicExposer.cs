@@ -25,7 +25,6 @@ namespace JurassicTools
 
         private readonly Dictionary<Type, JurassicInfo[]> TypeInfos = new Dictionary<Type, JurassicInfo[]>();
 
-        private readonly Dictionary<Type, Type> StaticProxyCache = new Dictionary<Type, Type>();
         private readonly Dictionary<Type, Type> InstanceProxyCache = new Dictionary<Type, Type>();
 
         private long DelegateCounter;
@@ -33,12 +32,12 @@ namespace JurassicTools
         private readonly Dictionary<Tuple<Type, WeakReference>, Delegate> DelegateProxyCache = new Dictionary<Tuple<Type, WeakReference>, Delegate>();
         private readonly Dictionary<long, object> DelegateFunctions = new Dictionary<long, object>();
 
-        public JurassicExposer(ScriptEngine engine, string assemblyName)
+        public JurassicExposer(ScriptEngine engine)
         {
             this.engine = engine;
-            AssemblyName name = new AssemblyName(assemblyName);
+            var name = new AssemblyName("JurassicProxy");
             MyAssembly = AppDomain.CurrentDomain.DefineDynamicAssembly(name, AssemblyBuilderAccess.RunAndSave);
-            MyModule = MyAssembly.DefineDynamicModule(string.Format("{0}.dll", assemblyName), string.Format("{0}.dll", assemblyName));
+            MyModule = MyAssembly.DefineDynamicModule(string.Format("{0}.dll", name.Name), string.Format("{0}.dll", name.Name));
         }
 
         public void SaveAssembly()
@@ -69,7 +68,7 @@ namespace JurassicTools
             TypeInfos[typeT] = infos;
         }
 
-        private JurassicInfo[] FindInfos(Type type)
+        public JurassicInfo[] FindInfos(Type type)
         {
             List<JurassicInfo> infos = new List<JurassicInfo>();
             Type t = type;
@@ -548,7 +547,7 @@ namespace JurassicTools
                 il.Emit(OpCodes.Ldloc, par); // >par
                 il.Emit(OpCodes.Ldc_I4, i); // >i
                 il.Emit(OpCodes.Ldarg, i); // > arg*
-                if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrWrap(il, parameterInfos[i].ParameterType, null, localFunction);
+                if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrWrap(il, parameterInfos[i].ParameterType, localFunction);
                 if (parameterInfos[i].ParameterType.IsValueType) il.Emit(OpCodes.Box, parameterInfos[i].ParameterType);
                 il.Emit(OpCodes.Stelem_Ref); // <par[<i] = <
             }
@@ -562,7 +561,7 @@ namespace JurassicTools
             return dele;
         }
 
-        private void EmitConvertOrWrap(ILGenerator gen, Type type, FieldBuilder fldExposer, LocalBuilder localFunction = null)
+        internal void EmitConvertOrWrap(ILGenerator gen, Type type, LocalBuilder localFunction = null)
         {
             if (type == typeof(void)) return;
             // > value (from caller)
@@ -580,13 +579,10 @@ namespace JurassicTools
             if (convertOrWrapType.IsValueType) gen.Emit(OpCodes.Unbox_Any, convertOrWrapType);
         }
 
-        private void EmitConvertOrUnwrap(ILGenerator gen, int parameterIndex, FieldInfo exposer, Type type)
+        internal void EmitConvertOrUnwrap(ILGenerator gen, int parameterIndex, FieldInfo exposer, Type type)
         {
             if (type == typeof(void)) return;
 
-            // > value (from caller)
-            Type convertOrWrapType = GetConvertOrWrapType(type);
-            //if (convertOrWrapType.IsValueType) gen.Emit(OpCodes.Box, convertOrWrapType);
             gen.Emit(OpCodes.Ldarg_0);
             gen.Emit(OpCodes.Ldfld, exposer);
             gen.Emit(OpCodes.Ldarg, parameterIndex + 1);
@@ -619,7 +615,6 @@ namespace JurassicTools
         public object ConvertObject(object instance, Type type)
         {
             return ConvertOrUnwrapObject(instance, type);
-            return instance;
         }
 
         public ObjectInstance WrapObject(object instance)
@@ -633,70 +628,10 @@ namespace JurassicTools
                 // public class JurassicInstanceProxy.T : ObjectInstance
                 TypeBuilder typeBuilder = MyModule.DefineType("JurassicInstanceProxy." + type.FullName, TypeAttributes.Class | TypeAttributes.Public,
                                                                typeof(ObjectInstance));
-
-                // public object realInstance
-                FieldBuilder fldInstance = typeBuilder.DefineField("realInstance", instance.GetType(), FieldAttributes.Private);
-                var fieldExposer = typeBuilder.DefineField("exposer", typeof(JurassicExposer), FieldAttributes.Private);
-
-                // .ctor(ScriptEngine engine, object instance)
-                // : base(engine)
-                // base.PopulateFunctions(typeof(__this__), BindingFlags.Public | BindingFlags.Instance /*| BindingFlags.DeclaredOnly*/);
-                // realInstance = instance;
-                ConstructorBuilder ctorBuilder = typeBuilder.DefineConstructor(MethodAttributes.Public | MethodAttributes.HideBySig, CallingConventions.HasThis,
-                                                                               new[] { typeof(ScriptEngine), typeof(JurassicExposer), instance.GetType() });
-                ILGenerator ctorGen = ctorBuilder.GetILGenerator();
-
-                ctorGen.Emit(OpCodes.Ldarg_0); // # this
-                ctorGen.Emit(OpCodes.Ldarg_1); // > engine
-                ctorGen.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__ctor__ScriptEngine); // #:base(<)
-                ctorGen.Emit(OpCodes.Ldarg_0); // # this
-                ctorGen.Emit(OpCodes.Ldtoken, typeBuilder); // >[__this__]
-                ctorGen.Emit(OpCodes.Call, ReflectionCache.Type__GetTypeFromHandle__RuntimeTypeHandle); // > typeof(<[__this__])
-                ctorGen.Emit(OpCodes.Ldc_I4, (int)(BindingFlags.Public | BindingFlags.Instance /*| BindingFlags.DeclaredOnly*/)); // > flags
-                ctorGen.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__PopulateFunctions__Type_BindingFlags); // #.PopulateFunctions(<, <);
-                ctorGen.Emit(OpCodes.Ldarg_0);
-                ctorGen.Emit(OpCodes.Ldarg_2);
-                ctorGen.Emit(OpCodes.Stfld, fieldExposer); // #.realInstance = <
-
-                ctorGen.Emit(OpCodes.Ldarg_0); // # this
-                ctorGen.Emit(OpCodes.Ldarg_3); // > instance
-                ctorGen.Emit(OpCodes.Stfld, fldInstance); // #.realInstance = <
-                ctorGen.Emit(OpCodes.Ret);
-
-                // public ... Method(...)
-                MethodInfo[] miInsts = type.GetMethods(BindingFlags.Public | BindingFlags.Instance /*| BindingFlags.DeclaredOnly*/);
-                List<string> methodNames = new List<string>();
-                foreach (MethodInfo miInst in miInsts)
-                {
-                    
-                    if (methodNames.Contains(miInst.Name)) continue;
-                    else methodNames.Add(miInst.Name);
-                    Attribute[] infoAttributes = GetAttributes(infos, miInst.Name, typeof(JSFunctionAttribute));
-                    if (!Attribute.IsDefined(miInst, typeof(JSFunctionAttribute)) && infoAttributes.Length == 0) continue;
-                    MethodBuilder proxyInst = typeBuilder.DefineMethod(miInst.Name, miInst.Attributes);
-                    proxyInst.SetReturnType(GetConvertOrWrapType(miInst.ReturnType));
-                    proxyInst.CopyParametersFrom(this, miInst);
-                    proxyInst.CopyCustomAttributesFrom(miInst, infoAttributes);
-                    ILGenerator methodGen = proxyInst.GetILGenerator();
-
-                    ParameterInfo[] parameterInfos = miInst.GetParameters();
-                    if (miInst.ReturnType != typeof(void))
-                    {
-                        methodGen.Emit(OpCodes.Ldarg_0);
-                        methodGen.Emit(OpCodes.Ldfld, fieldExposer);
-                    }
-                    methodGen.Emit(OpCodes.Ldarg_0);
-                    methodGen.Emit(OpCodes.Ldfld, fldInstance);
-                    for (int i = 0; i < parameterInfos.Length; i++)
-                    {
-                        //methodGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(methodGen, i, fieldExposer, parameterInfos[i].ParameterType);
-                    }
-                    methodGen.Emit(miInst.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, miInst); // >? <.Method(<*)
-
-                    EmitConvertOrWrap(methodGen, miInst.ReturnType, fieldExposer);
-                    methodGen.Emit(OpCodes.Ret);
-                }
+                var fieldCreator = typeBuilder.PopulateFields(type);
+                
+                typeBuilder.CreateConstructor(fieldCreator);
+                typeBuilder.CreateMethods(this, fieldCreator);
 
                 // public ... Property
                 PropertyInfo[] piInsts = type.GetProperties(BindingFlags.Public | BindingFlags.Instance /*| BindingFlags.DeclaredOnly*/);
@@ -719,15 +654,15 @@ namespace JurassicTools
                         ILGenerator getGen = proxyInstanceGet.GetILGenerator();
 
                         getGen.Emit(OpCodes.Ldarg_0); // # this
-                        getGen.Emit(OpCodes.Ldfld, fldInstance); // > #.realInstance
+                        getGen.Emit(OpCodes.Ldfld, fieldCreator.RealInstance); // > #.realInstance
                         ParameterInfo[] parameterInfos = piInstGet.GetParameters();
                         for (int i = 0; i < parameterInfos.Length; i++)
                         {
                             //getGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(getGen, i, fieldExposer, parameterInfos[i].ParameterType);
+                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(getGen, i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
                         }
                         getGen.Emit(piInstGet.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, piInstGet); // <.Property <*
-                        EmitConvertOrWrap(getGen, piInstGet.ReturnType, fieldExposer);
+                        EmitConvertOrWrap(getGen, piInstGet.ReturnType);
                         getGen.Emit(OpCodes.Ret);
                         proxyInstance.SetGetMethod(proxyInstanceGet);
                     }
@@ -741,12 +676,12 @@ namespace JurassicTools
                         ILGenerator setGen = proxyInstanceSet.GetILGenerator();
 
                         setGen.Emit(OpCodes.Ldarg_0); // # this
-                        setGen.Emit(OpCodes.Ldfld, fldInstance); // > #.realInstance
+                        setGen.Emit(OpCodes.Ldfld, fieldCreator.RealInstance); // > #.realInstance
                         ParameterInfo[] parameterInfos = piInstSet.GetParameters();
                         for (int i = 0; i < parameterInfos.Length; i++)
                         {
                             //setGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(setGen, i, fieldExposer, parameterInfos[i].ParameterType);
+                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(setGen, i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
                         }
                         setGen.Emit(piInstSet.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, piInstSet); // <.Property = <*
                         setGen.Emit(OpCodes.Ret);
@@ -771,12 +706,12 @@ namespace JurassicTools
                     proxyAdd.CopyCustomAttributesFrom(eiAdd, new JSFunctionAttribute());
                     ILGenerator ilAdd = proxyAdd.GetILGenerator();
                     ilAdd.Emit(OpCodes.Ldarg_0); // # this
-                    ilAdd.Emit(OpCodes.Ldfld, fldInstance); // > #.realInstance
+                    ilAdd.Emit(OpCodes.Ldfld, fieldCreator.RealInstance); // > #.realInstance
                     ParameterInfo[] parameterInfos = eiAdd.GetParameters();
                     for (int i = 0; i < parameterInfos.Length; i++)
                     {
                         //ilAdd.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(ilAdd, i, fieldExposer, parameterInfos[i].ParameterType);
+                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(ilAdd, i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
                     }
                     ilAdd.Emit(eiAdd.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, eiAdd);
                     ilAdd.Emit(OpCodes.Ret);
@@ -789,12 +724,12 @@ namespace JurassicTools
                     proxyRemove.CopyCustomAttributesFrom(eiRemove, new JSFunctionAttribute());
                     ILGenerator ilRemove = proxyRemove.GetILGenerator();
                     ilRemove.Emit(OpCodes.Ldarg_0); // # this
-                    ilRemove.Emit(OpCodes.Ldfld, fldInstance); // > #.realInstance
+                    ilRemove.Emit(OpCodes.Ldfld, fieldCreator.RealInstance); // > #.realInstance
                     parameterInfos = eiRemove.GetParameters();
                     for (int i = 0; i < parameterInfos.Length; i++)
                     {
                         //ilRemove.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(ilRemove, i, fieldExposer, parameterInfos[i].ParameterType);
+                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(ilRemove, i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
                     }
                     ilRemove.Emit(eiRemove.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, eiRemove);
                     ilRemove.Emit(OpCodes.Ret);
@@ -808,7 +743,7 @@ namespace JurassicTools
             return proxiedInstance;
         }
 
-        private static Attribute[] GetAttributes(JurassicInfo[] infos, string name, Type attributeType = null)
+        public Attribute[] GetAttributes(JurassicInfo[] infos, string name, Type attributeType = null)
         {
             return (infos == null || infos.Length == 0)
                      ? new Attribute[0]
