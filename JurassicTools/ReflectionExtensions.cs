@@ -9,7 +9,7 @@ using Jurassic.Library;
 
 namespace JurassicTools
 {
-  public static class ReflectionExtensions
+    public static class ReflectionExtensions
   {
     public static void CopyParametersFrom(this MethodBuilder builder, JurassicExposer exposer, MethodInfo info, bool makeCompatible = true)
     {

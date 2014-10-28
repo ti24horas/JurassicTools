@@ -5,7 +5,6 @@ using System.Collections.Specialized;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Text;
 using System.Threading;
 using Jurassic;
 using Jurassic.Library;
@@ -13,8 +12,6 @@ using Jurassic.Library;
 namespace JurassicTools
 {
     using System.ComponentModel;
-    using System.Net.NetworkInformation;
-    using System.Security.Cryptography;
 
     public class JurassicExposer
     {
@@ -25,6 +22,7 @@ namespace JurassicTools
 
         private readonly Dictionary<Type, JurassicInfo[]> TypeInfos = new Dictionary<Type, JurassicInfo[]>();
 
+        private readonly HashSet<Type> StaticProxyCache = new HashSet<Type>();
         private readonly Dictionary<Type, Type> InstanceProxyCache = new Dictionary<Type, Type>();
 
         private long DelegateCounter;
@@ -89,12 +87,103 @@ namespace JurassicTools
             }
             return infos.ToArray();
         }
-        /*
+
         public void ExposeClass<T>(String name = null)
         {
-            ExposeClass(typeof(T), name);
+            ExposeClass(typeof(T), this.engine, name);
         }
-        */
+
+        public void ExposeClass(Type typeT, ScriptEngine engine, String name = null)
+        {
+            if (StaticProxyCache.Contains(typeT))
+            {
+                return;
+            }
+
+            if (name == null) name = typeT.Name;
+            JurassicInfo[] infos = FindInfos(typeT);
+
+            Type proxiedType;
+            // public class JurassicStaticProxy.T : ClrFunction
+            TypeBuilder typeBuilder = MyModule.DefineType("JurassicStaticProxy." + typeT.FullName, TypeAttributes.Class | TypeAttributes.Public, typeof(ClrFunction));
+
+            // public .ctor(ScriptEngine engine, plainString name)
+            // : base(engine.Function.InstancePrototype, name, engine.Object)
+            // base.PopulateFunctions(null, BindingFlags.Public | BindingFlags.Static /*| BindingFlags.DeclaredOnly*/);
+            // base.PopulateFields(null);
+            var exposer = typeBuilder.DefineField("exposer", typeof(JurassicExposer), FieldAttributes.Private| FieldAttributes.InitOnly);
+            var ctorBuilder = typeBuilder.DefineConstructor(MethodAttributes.Public | MethodAttributes.HideBySig, CallingConventions.HasThis, new[] { typeof(ScriptEngine), typeof(JurassicExposer), typeof(string) });
+            ctorBuilder.CreateConstructor(null,
+                gen =>
+                    {
+                        gen.Emit(OpCodes.Ldarg_0);
+                        gen.Emit(OpCodes.Ldarg_1);
+                        gen.Emit(OpCodes.Callvirt, ReflectionCache.ScriptEngine__get_Function); // > <.Function
+                        gen.Emit(OpCodes.Callvirt, ReflectionCache.FunctionInstance__get_InstancePrototype); // > <.InstancePrototype
+                        gen.Emit(OpCodes.Ldarg_3);
+                        gen.Emit(OpCodes.Ldarg_1);
+                        gen.Emit(OpCodes.Callvirt, ReflectionCache.ScriptEngine__get_Object);
+                        gen.Emit(OpCodes.Call, ReflectionCache.ClrFunction__ctor__ObjectInstance_String_ObjectInstance);
+                        gen.PopulateFieldFromConstructor(exposer, 2);
+                        
+                    });
+
+            if (typeT.IsEnum)
+            {
+                if (Attribute.IsDefined(typeT, typeof(FlagsAttribute)))
+                {
+                    Type enumType = Enum.GetUnderlyingType(typeT);
+                    foreach (string v in Enum.GetNames(typeT))
+                    {
+                        FieldBuilder field = typeBuilder.DefineField(v, enumType, FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.Literal);
+                        field.SetConstant(Convert.ChangeType(Enum.Parse(typeT, v), enumType));
+                        field.SetCustomAttribute(new CustomAttributeBuilder(ReflectionCache.JSField__ctor, new object[] { }));
+                    }
+                }
+                else
+                {
+                    foreach (string v in Enum.GetNames(typeT))
+                    {
+                        FieldBuilder field = typeBuilder.DefineField(v, typeof(string), FieldAttributes.Public | FieldAttributes.Static | FieldAttributes.Literal);
+                        field.SetConstant(v);
+                        field.SetCustomAttribute(new CustomAttributeBuilder(ReflectionCache.JSField__ctor, new object[] { }));
+                    }
+                }
+            }
+            else
+            {
+                // [JsConstructorFunction]
+                // public ObjectInstance Construct(params object[] args)
+                // return JurassicExposer.WrapObject(Activator.CreateInstance(typeof(T), args), Engine);
+                var jsctorBuilder = typeBuilder.DefineMethod("Construct", MethodAttributes.Public | MethodAttributes.HideBySig, CallingConventions.HasThis, typeof(ObjectInstance), new[] { typeof(Object[]) });
+
+                jsctorBuilder.SetCustomAttribute(new CustomAttributeBuilder(ReflectionCache.JSConstructorFunctionAttribute__ctor, new object[] { }));
+                var jsctorParams = jsctorBuilder.DefineParameter(1, ParameterAttributes.None, "args");
+                jsctorParams.SetCustomAttribute(new CustomAttributeBuilder(ReflectionCache.ParamArrayAttribute__ctor, new object[] { }));
+                var jsctorGen = jsctorBuilder.GetILGenerator();
+                jsctorGen.Emit(OpCodes.Ldarg_0);
+                jsctorGen.Emit(OpCodes.Ldfld, exposer);
+
+                jsctorGen.Emit(OpCodes.Ldarg_0);
+                jsctorGen.Emit(OpCodes.Ldfld, exposer);
+
+                jsctorGen.Emit(OpCodes.Ldtoken, typeT); // T
+
+                jsctorGen.Emit(OpCodes.Call, ReflectionCache.Type__GetTypeFromHandle__RuntimeTypeHandle); // > typeof(T)
+                
+                jsctorGen.Emit(OpCodes.Ldarg_1); // > args
+
+                jsctorGen.Emit(OpCodes.Callvirt, typeof(JurassicExposer).GetMethod("CreateNewInstance", new[] { typeof(Type), typeof(object[]) }));
+
+                jsctorGen.Emit(OpCodes.Call, ReflectionCache.JurassicExposer__WrapObject__Object_ScriptEngine); // > JurassicExposer.WrapObject(<, <)
+                jsctorGen.Emit(OpCodes.Ret);
+            }
+
+            proxiedType = typeBuilder.CreateType();
+            ClrFunction proxiedInstance = (ClrFunction)Activator.CreateInstance(proxiedType, engine, this, name);
+            engine.SetGlobalValue(name, proxiedInstance);
+            StaticProxyCache.Add(typeT);
+        }
 
         public void ExposeInstance(object instance, String name)
         {
@@ -573,7 +662,7 @@ namespace JurassicTools
             {
             }
             else gen.Emit(OpCodes.Ldloc, localFunction); // >localFunction
-            
+
             gen.Emit(OpCodes.Callvirt, ReflectionCache.JurassicExposer__ConvertOrWrapObject__Object_ScriptEngine); // JurassicExposer.ConvertOrWrapObject(<, <, <)
             Type convertOrWrapType = GetConvertOrWrapType(type);
             if (convertOrWrapType.IsValueType) gen.Emit(OpCodes.Unbox_Any, convertOrWrapType);
@@ -586,7 +675,7 @@ namespace JurassicTools
             gen.Emit(OpCodes.Ldarg_0);
             gen.Emit(OpCodes.Ldfld, exposer);
             gen.Emit(OpCodes.Ldarg, parameterIndex + 1);
-            
+
             if (type.IsValueType)
             {
                 if (type.IsEnum)
@@ -601,7 +690,7 @@ namespace JurassicTools
                     gen.Emit(OpCodes.Box, type); // why? bugs!
                 }
             }
-            
+
             Type realType = type;
             if (type.IsByRef || type.IsPointer) realType = type.GetElementType();
             gen.Emit(OpCodes.Ldtoken, realType); // > type
@@ -629,8 +718,9 @@ namespace JurassicTools
                 TypeBuilder typeBuilder = MyModule.DefineType("JurassicInstanceProxy." + type.FullName, TypeAttributes.Class | TypeAttributes.Public,
                                                                typeof(ObjectInstance));
                 var fieldCreator = typeBuilder.PopulateFields(type);
-                
-                typeBuilder.CreateConstructor(fieldCreator);
+                var ctorBuilder = typeBuilder.DefineConstructor(MethodAttributes.Public | MethodAttributes.HideBySig, CallingConventions.HasThis, new[] { typeof(ScriptEngine), typeof(JurassicExposer), type });
+
+                ctorBuilder.CreateConstructor(fieldCreator);
                 typeBuilder.CreateMethods(this, fieldCreator);
 
                 // public ... Property
@@ -750,6 +840,11 @@ namespace JurassicTools
                      : infos.Where(i => String.Equals(i.MemberName, name))
                             .SelectMany(i => i.Attributes.Where(a => attributeType == null || a.GetType() == attributeType))
                             .ToArray();
+        }
+
+        public object CreateNewInstance(Type objectType, object[] args)
+        {
+            return Activator.CreateInstance(objectType, args);
         }
     }
 }

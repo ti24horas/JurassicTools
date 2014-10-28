@@ -9,7 +9,7 @@
     using Jurassic;
     using Jurassic.Library;
 
-    public struct IlFieldResult
+    public class IlFieldResult
     {
         public FieldInfo RealInstance { get; set; }
 
@@ -20,7 +20,7 @@
 
     public static class IlExtensions
     {
-        private static void PopulateFieldFromConstructor(this ILGenerator gen, FieldInfo field, int argIndex)
+        public static void PopulateFieldFromConstructor(this ILGenerator gen, FieldInfo field, int argIndex)
         {
             gen.Emit(OpCodes.Ldarg_0);
             switch (argIndex)
@@ -52,25 +52,37 @@
             return new IlFieldResult { ExposerInstance = fieldExposer, RealInstance = fldInstance, InstanceType = instanceType };
         }
 
-        public static void CreateConstructor(this TypeBuilder builder, IlFieldResult fieldResult)
+        public static void CreateConstructor(this ConstructorBuilder builder, IlFieldResult fieldResult, Action<ILGenerator> onEmitArgs = null, int baseCtorArgumentCount = 1)
         {
-            var ctorBuilder = builder.DefineConstructor(MethodAttributes.Public | MethodAttributes.HideBySig, CallingConventions.HasThis, new[] { typeof(ScriptEngine), typeof(JurassicExposer), fieldResult.InstanceType });
 
             #region ctor
 
-            var ctorGen = ctorBuilder.GetILGenerator();
-            ctorGen.Emit(OpCodes.Ldarg_0); // # this
-            ctorGen.Emit(OpCodes.Ldarg_1); // > engine
-            ctorGen.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__ctor__ScriptEngine); // #:base(<)
+            var ctorGen = builder.GetILGenerator();
+            if (onEmitArgs != null)
+            {
+                onEmitArgs(ctorGen);
+            }
+            else
+            {
+                ctorGen.Emit(OpCodes.Ldarg_0); // # this
+                ctorGen.Emit(OpCodes.Ldarg_1); // > engine
+                ctorGen.Emit(OpCodes.Call, ReflectionCache.ObjectInstance__ctor__ScriptEngine); // #:base(<)
+            }
+
             ctorGen.Emit(OpCodes.Ldarg_0); // # this
             #endregion
 
-            ctorGen.PopulateFieldFromConstructor(fieldResult.ExposerInstance, 2);
-            ctorGen.PopulateFieldFromConstructor(fieldResult.RealInstance, 3);
+            if (fieldResult != null)
+            {
+                ctorGen.PopulateFieldFromConstructor(fieldResult.ExposerInstance, 2);
+                ctorGen.PopulateFieldFromConstructor(fieldResult.RealInstance, 3);
+            }
 
             #region PopulateFunctions
-            ctorGen.Emit(OpCodes.Ldtoken, builder); // >[__this__]
-            ctorGen.Emit(OpCodes.Call, ReflectionCache.Type__GetTypeFromHandle__RuntimeTypeHandle); // > typeof(<[__this__])
+            ctorGen.Emit(OpCodes.Ldarg_0); // >[__this__]
+            ctorGen.Emit(OpCodes.Callvirt, typeof(Type).GetMethod("GetType", new Type[0])); // >[__this__]
+            
+            //ctorGen.Emit(OpCodes.Call, ReflectionCache.Type__GetTypeFromHandle__RuntimeTypeHandle); // > typeof(<[__this__])
             ctorGen.Emit(OpCodes.Ldc_I4, (int)(BindingFlags.Public | BindingFlags.Instance /*| BindingFlags.DeclaredOnly*/)); // > flags
             ctorGen.Emit(OpCodes.Callvirt, ReflectionCache.ObjectInstance__PopulateFunctions__Type_BindingFlags); // #.PopulateFunctions(<, <);
             #endregion
@@ -81,7 +93,6 @@
             ctorGen.Emit(OpCodes.Callvirt, ReflectionCache.ObjectInstance__PopulateFields__Type); // #.PopulateFields(<)
             #endregion
 
-            
             ctorGen.Emit(OpCodes.Ret);
         }
 
