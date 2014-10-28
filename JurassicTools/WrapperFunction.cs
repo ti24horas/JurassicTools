@@ -11,25 +11,28 @@ namespace JurassicTools
 {
   internal class WrapperFunction : FunctionInstance
   {
-    private readonly Delegate _delegate;
+      private readonly JurassicExposer exposer;
 
-    public WrapperFunction(ScriptEngine engine, Delegate dele)
+      private readonly Delegate _delegate;
+
+    public WrapperFunction(JurassicExposer exposer, ScriptEngine engine, Delegate dele)
       : base(engine)
     {
-      _delegate = dele;
+        this.exposer = exposer;
+        _delegate = dele;
     }
 
-    public override object CallLateBound(object thisObject, params object[] argumentValues)
+      public override object CallLateBound(object thisObject, params object[] argumentValues)
     {
       object[] args = new object[argumentValues.Length];
       ParameterInfo[] parameterInfos = _delegate.GetType().GetMethod("Invoke").GetParameters();
       Type[] types = parameterInfos.Select(pi => pi.ParameterType).ToArray();
       for (int i = 0; i < argumentValues.Length; i++)
       {
-        args[i] = JurassicExposer.ConvertOrUnwrapObject(argumentValues[i], types[i]);
+        args[i] = this.exposer.ConvertOrUnwrapObject(argumentValues[i], types[i]);
       }
       object ret = _delegate.DynamicInvoke(args);
-      return JurassicExposer.ConvertOrWrapObject(ret, Engine);
+      return this.exposer.ConvertOrWrapObject(ret);
     }
   }
 }

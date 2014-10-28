@@ -9,16 +9,16 @@ using Jurassic.Library;
 
 namespace JurassicTools
 {
-  public static class ReflectionExtensions
+    public static class ReflectionExtensions
   {
-    public static void CopyParametersFrom(this MethodBuilder builder, MethodInfo info, bool makeCompatible = true)
+    public static void CopyParametersFrom(this MethodBuilder builder, JurassicExposer exposer, MethodInfo info, bool makeCompatible = true)
     {
       ParameterInfo[] parameters = info.GetParameters();
       JSFunctionAttribute attr = Attribute.GetCustomAttribute(info, typeof(JSFunctionAttribute)) as JSFunctionAttribute;
       if (attr != null && attr.Flags.HasFlag(JSFunctionFlags.HasEngineParameter)) parameters = parameters.Skip(1).ToArray();
       builder.SetParameters(
         parameters.Select(
-          p => makeCompatible && !Attribute.IsDefined(p, typeof(ParamArrayAttribute)) ? JurassicExposer.GetConvertOrWrapType(p.ParameterType) : p.ParameterType)
+          p => makeCompatible && !Attribute.IsDefined(p, typeof(ParamArrayAttribute)) ? exposer.GetConvertOrWrapType(p.ParameterType) : p.ParameterType)
                   .ToArray());
       for (int index = 0; index < parameters.Length; index++)
       {
