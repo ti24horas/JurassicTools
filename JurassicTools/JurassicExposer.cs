@@ -444,14 +444,18 @@
                     //if (instance is ObjectInstance) return instance;
                     if (type.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>)))
                     {
-                        /*IEnumerable ienum = (IEnumerable<Object>)instance;
-                        int i = 0;
-                        foreach (var item in ienum)
+                        var arr = instance as ArrayInstance;
+                        var actualObj = type.GetGenericArguments().First();
+                        var list = Array.CreateInstance(actualObj, arr.Length);
+                        for (var i = 0; i < arr.Length; i++)
                         {
-                          obj[i++] = ConvertOrWrapObject(item);
+                            if (arr[i] is ObjectInstance && Type.GetTypeCode(arr[i].GetType()) == TypeCode.Object)
+                            {
+                                var inst = this.ConvertOrUnwrapObject(arr[i], actualObj);
+                                list.SetValue(inst, i);
+                            }
                         }
-                        obj["length"] = i;*/
-                        throw new NotImplementedException("TODO: Unwrap IEnumerable<>");
+                        return list;
                     }
                     if (type.GetInterfaces().Any(i => i == typeof(IEnumerable)))
                     {
