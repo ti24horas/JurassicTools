@@ -18,7 +18,7 @@ namespace JurassicTools
       if (attr != null && attr.Flags.HasFlag(JSFunctionFlags.HasEngineParameter)) parameters = parameters.Skip(1).ToArray();
       builder.SetParameters(
         parameters.Select(
-          p => makeCompatible && !Attribute.IsDefined(p, typeof(ParamArrayAttribute)) ? exposer.GetConvertOrWrapType(p.ParameterType) : p.ParameterType)
+          p => makeCompatible && !Attribute.IsDefined(p, typeof(ParamArrayAttribute)) ? p.ParameterType.GetConvertOrWrapType() : p.ParameterType)
                   .ToArray());
       for (int index = 0; index < parameters.Length; index++)
       {

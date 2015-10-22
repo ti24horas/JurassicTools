@@ -1,17 +1,17 @@
-﻿using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Collections.Specialized;
-using System.Linq;
-using System.Reflection;
-using System.Reflection.Emit;
-using System.Threading;
-using Jurassic;
-using Jurassic.Library;
-
-namespace JurassicTools
+﻿namespace JurassicTools
 {
+    using System;
+    using System.Collections;
+    using System.Collections.Generic;
+    using System.Collections.Specialized;
     using System.ComponentModel;
+    using System.Linq;
+    using System.Reflection;
+    using System.Reflection.Emit;
+    using System.Threading;
+
+    using Jurassic;
+    using Jurassic.Library;
 
     public class JurassicExposer
     {
@@ -22,7 +22,7 @@ namespace JurassicTools
 
         private readonly Dictionary<Type, JurassicInfo[]> TypeInfos = new Dictionary<Type, JurassicInfo[]>();
 
-        private readonly HashSet<Type> StaticProxyCache = new HashSet<Type>();
+        private readonly HashSet<Type> staticProxyCache = new HashSet<Type>();
         private readonly Dictionary<Type, Type> InstanceProxyCache = new Dictionary<Type, Type>();
 
         private long DelegateCounter;
@@ -55,18 +55,7 @@ namespace JurassicTools
             return l;
         }
 
-        public void RegisterInfos<T>(params JurassicInfo[] infos)
-        {
-            RegisterInfos(typeof(T), infos);
-        }
-
-        public void RegisterInfos(Type typeT, params JurassicInfo[] infos)
-        {
-            if (TypeInfos.ContainsKey(typeT)) return;
-            TypeInfos[typeT] = infos;
-        }
-
-        public JurassicInfo[] FindInfos(Type type)
+        internal JurassicInfo[] FindInfos(Type type)
         {
             List<JurassicInfo> infos = new List<JurassicInfo>();
             Type t = type;
@@ -95,7 +84,7 @@ namespace JurassicTools
 
         public void ExposeClass(Type typeT, ScriptEngine engine, String name = null)
         {
-            if (StaticProxyCache.Contains(typeT))
+            if (this.staticProxyCache.Contains(typeT))
             {
                 return;
             }
@@ -111,22 +100,22 @@ namespace JurassicTools
             // : base(engine.Function.InstancePrototype, name, engine.Object)
             // base.PopulateFunctions(null, BindingFlags.Public | BindingFlags.Static /*| BindingFlags.DeclaredOnly*/);
             // base.PopulateFields(null);
-            var exposer = typeBuilder.DefineField("exposer", typeof(JurassicExposer), FieldAttributes.Private| FieldAttributes.InitOnly);
+            var exposer = typeBuilder.DefineField("exposer", typeof(JurassicExposer), FieldAttributes.Private | FieldAttributes.InitOnly);
             var ctorBuilder = typeBuilder.DefineConstructor(MethodAttributes.Public | MethodAttributes.HideBySig, CallingConventions.HasThis, new[] { typeof(ScriptEngine), typeof(JurassicExposer), typeof(string) });
             ctorBuilder.CreateConstructor(null,
                 gen =>
-                    {
-                        gen.Emit(OpCodes.Ldarg_0);
-                        gen.Emit(OpCodes.Ldarg_1);
-                        gen.Emit(OpCodes.Callvirt, ReflectionCache.ScriptEngine__get_Function); // > <.Function
-                        gen.Emit(OpCodes.Callvirt, ReflectionCache.FunctionInstance__get_InstancePrototype); // > <.InstancePrototype
-                        gen.Emit(OpCodes.Ldarg_3);
-                        gen.Emit(OpCodes.Ldarg_1);
-                        gen.Emit(OpCodes.Callvirt, ReflectionCache.ScriptEngine__get_Object);
-                        gen.Emit(OpCodes.Call, ReflectionCache.ClrFunction__ctor__ObjectInstance_String_ObjectInstance);
-                        gen.PopulateFieldFromConstructor(exposer, 2);
-                        
-                    });
+                {
+                    gen.Emit(OpCodes.Ldarg_0);
+                    gen.Emit(OpCodes.Ldarg_1);
+                    gen.Emit(OpCodes.Callvirt, ReflectionCache.ScriptEngine__get_Function); // > <.Function
+                    gen.Emit(OpCodes.Callvirt, ReflectionCache.FunctionInstance__get_InstancePrototype); // > <.InstancePrototype
+                    gen.Emit(OpCodes.Ldarg_3);
+                    gen.Emit(OpCodes.Ldarg_1);
+                    gen.Emit(OpCodes.Callvirt, ReflectionCache.ScriptEngine__get_Object);
+                    gen.Emit(OpCodes.Call, ReflectionCache.ClrFunction__ctor__ObjectInstance_String_ObjectInstance);
+                    gen.PopulateFieldFromConstructor(exposer, 2);
+
+                });
 
             if (typeT.IsEnum)
             {
@@ -170,7 +159,7 @@ namespace JurassicTools
                 jsctorGen.Emit(OpCodes.Ldtoken, typeT); // T
 
                 jsctorGen.Emit(OpCodes.Call, ReflectionCache.Type__GetTypeFromHandle__RuntimeTypeHandle); // > typeof(T)
-                
+
                 jsctorGen.Emit(OpCodes.Ldarg_1); // > args
 
                 jsctorGen.Emit(OpCodes.Callvirt, typeof(JurassicExposer).GetMethod("CreateNewInstance", new[] { typeof(Type), typeof(object[]) }));
@@ -180,9 +169,9 @@ namespace JurassicTools
             }
 
             proxiedType = typeBuilder.CreateType();
-            ClrFunction proxiedInstance = (ClrFunction)Activator.CreateInstance(proxiedType, engine, this, name);
+            var proxiedInstance = (ClrFunction)Activator.CreateInstance(proxiedType, engine, this, name);
             engine.SetGlobalValue(name, proxiedInstance);
-            StaticProxyCache.Add(typeT);
+            this.staticProxyCache.Add(typeT);
         }
 
         public void ExposeInstance(object instance, String name)
@@ -196,73 +185,6 @@ namespace JurassicTools
             return ConvertOrWrapObject(instance);
         }
 
-        public Type GetConvertOrWrapType(Type type)
-        {
-            if (type == typeof(void)) return typeof(void);
-            if (type == typeof(ScriptEngine)) return typeof(ScriptEngine); // JSFunction with HasEngineParameter
-            if (type.IsEnum)
-            {
-                return Attribute.IsDefined(type, typeof(FlagsAttribute)) ? Enum.GetUnderlyingType(type) : typeof(string);
-            }
-            if (type.IsArray)
-            {
-                return typeof(ArrayInstance);
-            }
-            switch (Type.GetTypeCode(type))
-            {
-                case TypeCode.Boolean:
-                    return typeof(bool);
-                case TypeCode.Byte:
-                    return typeof(int);
-                case TypeCode.Char:
-                    return typeof(string);
-                case TypeCode.DateTime:
-                    return typeof(DateInstance);
-                case TypeCode.Decimal:
-                    return typeof(double);
-                case TypeCode.Double:
-                    return typeof(double);
-                case TypeCode.Int16:
-                    return typeof(int);
-                case TypeCode.Int32:
-                    return typeof(int);
-                case TypeCode.Int64:
-                    return typeof(double);
-                case TypeCode.Object:
-                    return typeof(ObjectInstance);
-                case TypeCode.SByte:
-                    return typeof(int);
-                case TypeCode.Single:
-                    return typeof(double);
-                case TypeCode.String:
-                    return typeof(string);
-                case TypeCode.UInt16:
-                    return typeof(int);
-                case TypeCode.UInt32:
-                    return typeof(uint);
-                case TypeCode.UInt64:
-                    return typeof(double);
-                default:
-                    throw new ArgumentException(string.Format("Cannot convert value of type {0}.", type), "type");
-            }
-        }
-
-        public Type GetConvertOrUnwrapType(Type type)
-        {
-            if (type == typeof(void)) return typeof(void);
-            if (type == typeof(ConcatenatedString)) return typeof(string);
-            if (type == typeof(ScriptEngine)) return typeof(ScriptEngine); // JSFunction with HasEngineParameter
-            if (type == typeof(ArrayInstance)) return typeof(object[]);
-            if (type == typeof(BooleanInstance) || type == typeof(bool)) return typeof(bool);
-            if (type == typeof(NumberInstance) || type == typeof(Byte) || type == typeof(Decimal) || type == typeof(Double) || type == typeof(Int16) ||
-                type == typeof(Int32) || type == typeof(Int64) || type == typeof(SByte) || type == typeof(Single) || type == typeof(UInt16) || type == typeof(UInt32) ||
-                type == typeof(UInt64)) return typeof(double);
-            if (type == typeof(StringInstance) || type == typeof(string)) return typeof(string);
-            if (type == typeof(DateInstance)) return typeof(DateTime);
-            if (type == typeof(FunctionInstance)) return typeof(Delegate); // TODO?
-            if (type == typeof(ObjectInstance)) return typeof(IDictionary<string, object>);
-            throw new ArgumentException("unkown type for unwrap: " + type.FullName);
-        }
 
         public object ConvertOrWrapObject(object instance)
         {
@@ -357,6 +279,7 @@ namespace JurassicTools
                                 obj.SetPropertyValue(item, arr, true);
                             }
                         }
+
                         return obj;
                     }
                     if (type.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>)))
@@ -421,7 +344,15 @@ namespace JurassicTools
                 object[] arr2 = new object[arr.Length];
                 for (int i = 0; i < arr.Length; i++)
                 {
-                    arr2[i] = ConvertOrUnwrapObject(arr[i], GetConvertOrUnwrapType(arr[i] == null ? null : arr[i].GetType()));
+                    var value = arr[i];
+                    if (value == null)
+                    {
+                        arr2[i] = null;
+                    }
+                    else
+                    {
+                        arr2[i] = ConvertOrUnwrapObject(value, value.GetType().GetConvertOrUnwrapType());
+                    }
                 }
                 return arr2;
             }
@@ -477,7 +408,7 @@ namespace JurassicTools
                         ObjectInstance obj = instance as ObjectInstance;
                         if (obj == null) return null;
                         return obj.Properties.ToDictionary(nameAndValue => nameAndValue.Name,
-                                                           nameAndValue => ConvertOrUnwrapObject(nameAndValue.Value, GetConvertOrUnwrapType(nameAndValue.Value.GetType())));
+                                                           nameAndValue => ConvertOrUnwrapObject(nameAndValue.Value, nameAndValue.Value.GetType().GetConvertOrUnwrapType()));
                     }
                     if (typeof(NameValueCollection).IsAssignableFrom(type))
                     {
@@ -517,7 +448,7 @@ namespace JurassicTools
                         int i = 0;
                         foreach (var item in ienum)
                         {
-                          obj[i++] = ConvertOrWrapObject(item, engine);
+                          obj[i++] = ConvertOrWrapObject(item);
                         }
                         obj["length"] = i;*/
                         throw new NotImplementedException("TODO: Unwrap IEnumerable<>");
@@ -642,69 +573,29 @@ namespace JurassicTools
                 il.Emit(OpCodes.Ldloc, par); // >par
                 il.Emit(OpCodes.Ldc_I4, i); // >i
                 il.Emit(OpCodes.Ldarg, i); // > arg*
-                if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) EmitConvertOrWrap(il, parameterInfos[i].ParameterType, localFunction);
-                if (parameterInfos[i].ParameterType.IsValueType) il.Emit(OpCodes.Box, parameterInfos[i].ParameterType);
+                if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) il.EmitConvertOrWrap(parameterInfos[i].ParameterType, localFunction);
+                if (parameterInfos[i].ParameterType.IsValueType)
+                {
+                    il.Emit(OpCodes.Box, parameterInfos[i].ParameterType);
+                }
+
                 il.Emit(OpCodes.Stelem_Ref); // <par[<i] = <
             }
+
             il.Emit(OpCodes.Ldnull); // >[thisObject]
             il.Emit(OpCodes.Ldloc, par); // >par
             il.Emit(OpCodes.Callvirt, ReflectionCache.FunctionInstance__CallLateBound__Object_aObject); // >? <localFunction.CallLateBound(<[thisObject], <par)
-            if (mi.ReturnType == typeof(void)) il.Emit(OpCodes.Pop);
-            else EmitConvertOrWrap(il, mi.ReturnType, null);
+            if (mi.ReturnType == typeof(void))
+            {
+                il.Emit(OpCodes.Pop);
+            }
+            else
+            {
+                il.EmitConvertOrWrap(mi.ReturnType);
+            }
             il.Emit(OpCodes.Ret);
             Delegate dele = dm.CreateDelegate(delegateType);
             return dele;
-        }
-
-        internal void EmitConvertOrWrap(ILGenerator gen, Type type, LocalBuilder localFunction = null)
-        {
-            if (type == typeof(void)) return;
-            // > value (from caller)
-            if (type.IsValueType)
-            {
-                gen.Emit(OpCodes.Box, type);
-            }
-            if (localFunction == null)
-            {
-            }
-            else gen.Emit(OpCodes.Ldloc, localFunction); // >localFunction
-
-            gen.Emit(OpCodes.Callvirt, ReflectionCache.JurassicExposer__ConvertOrWrapObject__Object_ScriptEngine); // JurassicExposer.ConvertOrWrapObject(<, <, <)
-            Type convertOrWrapType = GetConvertOrWrapType(type);
-            if (convertOrWrapType.IsValueType) gen.Emit(OpCodes.Unbox_Any, convertOrWrapType);
-        }
-
-        internal void EmitConvertOrUnwrap(ILGenerator gen, int parameterIndex, FieldInfo exposer, Type type)
-        {
-            if (type == typeof(void)) return;
-
-            gen.Emit(OpCodes.Ldarg_0);
-            gen.Emit(OpCodes.Ldfld, exposer);
-            gen.Emit(OpCodes.Ldarg, parameterIndex + 1);
-
-            if (type.IsValueType)
-            {
-                if (type.IsEnum)
-                {
-                    //return Attribute.IsDefined(type, typeof(FlagsAttribute)) ? Convert.ChangeType(instance, Enum.GetUnderlyingType(type)) : Enum.GetName(type, instance);
-                    if (Attribute.IsDefined(type, typeof(FlagsAttribute))) gen.Emit(OpCodes.Box, Enum.GetUnderlyingType(type));
-                    else gen.Emit(OpCodes.Box, typeof(string));
-                }
-                else
-                {
-                    // TODO: needed?
-                    gen.Emit(OpCodes.Box, type); // why? bugs!
-                }
-            }
-
-            Type realType = type;
-            if (type.IsByRef || type.IsPointer) realType = type.GetElementType();
-            gen.Emit(OpCodes.Ldtoken, realType); // > type
-
-            gen.Emit(OpCodes.Call, ReflectionCache.Type__GetTypeFromHandle__RuntimeTypeHandle); // > typeof(<)
-
-            gen.Emit(OpCodes.Callvirt, ReflectionCache.JurassicExposer__ConvertOrUnwrapObject__Object_Static); // JurassicExposer.ConvertOrUnwrapObject(<, <)
-            if (type.IsValueType) gen.Emit(OpCodes.Unbox_Any, type);
         }
 
         public object ConvertObject(object instance, Type type)
@@ -738,13 +629,13 @@ namespace JurassicTools
                     MethodInfo piInstGet = piInst.GetGetMethod();
                     MethodInfo piInstSet = piInst.GetSetMethod();
                     if (piInstGet == null && piInstSet == null) continue;
-                    PropertyBuilder proxyInstance = typeBuilder.DefineProperty(piInst.Name, piInst.Attributes, GetConvertOrWrapType(piInst.PropertyType), null);
+                    PropertyBuilder proxyInstance = typeBuilder.DefineProperty(piInst.Name, piInst.Attributes, piInst.PropertyType.GetConvertOrWrapType(), null);
                     proxyInstance.CopyCustomAttributesFrom(piInst, infoAttributes);
                     if (piInstGet != null /*&& !methodNames.Contains(piInstGet.Name)*/)
                     {
                         //methodNames.Add(piInstGet.Name);
                         MethodBuilder proxyInstanceGet = typeBuilder.DefineMethod(piInstGet.Name, piInstGet.Attributes);
-                        proxyInstanceGet.SetReturnType(GetConvertOrWrapType(piInstGet.ReturnType));
+                        proxyInstanceGet.SetReturnType(piInstGet.ReturnType.GetConvertOrWrapType());
                         proxyInstanceGet.CopyParametersFrom(this, piInstGet);
                         proxyInstanceGet.CopyCustomAttributesFrom(piInstGet);
                         ILGenerator getGen = proxyInstanceGet.GetILGenerator();
@@ -754,14 +645,14 @@ namespace JurassicTools
                         ParameterInfo[] parameterInfos = piInstGet.GetParameters();
                         for (int i = 0; i < parameterInfos.Length; i++)
                         {
-                            //getGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(getGen, i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
+                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) getGen.EmitConvertOrUnwrap(i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
                         }
                         getGen.Emit(piInstGet.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, piInstGet); // <.Property <*
-                        EmitConvertOrWrap(getGen, piInstGet.ReturnType);
+                        getGen.EmitConvertOrWrap(piInstGet.ReturnType);
                         getGen.Emit(OpCodes.Ret);
                         proxyInstance.SetGetMethod(proxyInstanceGet);
                     }
+
                     if (piInstSet != null /*&& !methodNames.Contains(piInstSet.Name)*/)
                     {
                         //methodNames.Add(piInstSet.Name);
@@ -773,11 +664,10 @@ namespace JurassicTools
 
                         setGen.Emit(OpCodes.Ldarg_0); // # this
                         setGen.Emit(OpCodes.Ldfld, fieldCreator.RealInstance); // > #.realInstance
-                        ParameterInfo[] parameterInfos = piInstSet.GetParameters();
+                        var parameterInfos = piInstSet.GetParameters();
                         for (int i = 0; i < parameterInfos.Length; i++)
                         {
-                            //setGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(setGen, i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
+                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) setGen.EmitConvertOrUnwrap(i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
                         }
                         setGen.Emit(piInstSet.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, piInstSet); // <.Property = <*
                         setGen.Emit(OpCodes.Ret);
@@ -806,9 +696,9 @@ namespace JurassicTools
                     ParameterInfo[] parameterInfos = eiAdd.GetParameters();
                     for (int i = 0; i < parameterInfos.Length; i++)
                     {
-                        //ilAdd.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(ilAdd, i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
+                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) ilAdd.EmitConvertOrUnwrap(i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
                     }
+
                     ilAdd.Emit(eiAdd.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, eiAdd);
                     ilAdd.Emit(OpCodes.Ret);
 
@@ -824,8 +714,7 @@ namespace JurassicTools
                     parameterInfos = eiRemove.GetParameters();
                     for (int i = 0; i < parameterInfos.Length; i++)
                     {
-                        //ilRemove.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) this.EmitConvertOrUnwrap(ilRemove, i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
+                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) ilRemove.EmitConvertOrUnwrap(i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
                     }
                     ilRemove.Emit(eiRemove.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, eiRemove);
                     ilRemove.Emit(OpCodes.Ret);
