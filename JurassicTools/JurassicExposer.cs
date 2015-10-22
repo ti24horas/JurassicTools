@@ -340,11 +340,11 @@
             }
             if (type.IsArray)
             {
-                ArrayInstance arr = (ArrayInstance)instance;
+                var arr = (Array)instance;
                 object[] arr2 = new object[arr.Length];
                 for (int i = 0; i < arr.Length; i++)
                 {
-                    var value = arr[i];
+                    var value = arr.GetValue(i);
                     if (value == null)
                     {
                         arr2[i] = null;
