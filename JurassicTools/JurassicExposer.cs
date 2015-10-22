@@ -544,16 +544,12 @@ namespace JurassicTools
                     {
                         var targetObject = Activator.CreateInstance(type);
                         var allJsProperties = from x in type.GetProperties()
-                                              let jsProperty =
-                                                  x.GetCustomAttributes(true)
-                                                  .OfType<JSPropertyAttribute>()
-                                                  .FirstOrDefault()
-                                              where jsProperty != null
+                                              let jsProp = x.GetCustomAttributes(typeof(JSPropertyAttribute), true).OfType<JSPropertyAttribute>().FirstOrDefault()
                                               select
                                                   new
                                                       {
                                                           propertyName = x.Name,
-                                                          jsPropertyName = jsProperty.Name ?? x.Name,
+                                                          jsPropertyName = (jsProp != null ? jsProp.Name : x.Name) ?? x.Name,
                                                           property = x
                                                       };
 
