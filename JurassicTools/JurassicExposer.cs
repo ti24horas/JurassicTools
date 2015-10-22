@@ -582,8 +582,18 @@ namespace JurassicTools
                                 }
                                 catch (ArgumentException)
                                 {
-                                    var convertedValue = Convert.ChangeType(value, property.property.PropertyType);
-                                    property.property.SetValue(targetObject, convertedValue, null);
+                                    if (property.property.PropertyType.IsEnum)
+                                    {
+                                        if (value is string)
+                                        {
+                                            property.property.SetValue(targetObject, Enum.Parse(property.property.PropertyType, value.ToString()), null);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        var convertedValue = Convert.ChangeType(value, property.property.PropertyType);
+                                        property.property.SetValue(targetObject, convertedValue, null);
+                                    }
 
                                 }
 
