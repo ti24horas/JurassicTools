@@ -127,7 +127,7 @@
                 for (var i = 0; i < parameterInfos.Length; i++)
                 {
                     //methodGen.Emit(OpCodes.Ldarg, i + 1); // > arg*
-                    if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute)))
+                    //if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute)))
                     {
                         methodGen.EmitConvertOrUnwrap(i, fieldResult.ExposerInstance, parameterInfos[i].ParameterType);
                     }

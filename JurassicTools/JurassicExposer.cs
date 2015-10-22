@@ -455,6 +455,14 @@
                     }
                     if (type.GetInterfaces().Any(i => i == typeof(IEnumerable)))
                     {
+                        ArrayInstance arr = engine.Array.Construct();
+                        IEnumerable ienum = (IEnumerable)instance;
+                        int i = 0;
+                        foreach (object item in ienum)
+                        {
+                            arr.Push(ConvertOrWrapObject(item));
+                        }
+                        return arr;
                         /*IEnumerable ienum = (IEnumerable)instance;
                         int i = 0;
                         foreach (var item in ienum)
@@ -573,7 +581,7 @@
                 il.Emit(OpCodes.Ldloc, par); // >par
                 il.Emit(OpCodes.Ldc_I4, i); // >i
                 il.Emit(OpCodes.Ldarg, i); // > arg*
-                if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) il.EmitConvertOrWrap(parameterInfos[i].ParameterType, localFunction);
+                il.EmitConvertOrWrap(parameterInfos[i].ParameterType, localFunction);
                 if (parameterInfos[i].ParameterType.IsValueType)
                 {
                     il.Emit(OpCodes.Box, parameterInfos[i].ParameterType);
@@ -645,7 +653,7 @@
                         ParameterInfo[] parameterInfos = piInstGet.GetParameters();
                         for (int i = 0; i < parameterInfos.Length; i++)
                         {
-                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) getGen.EmitConvertOrUnwrap(i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
+                            getGen.EmitConvertOrUnwrap(i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
                         }
                         getGen.Emit(piInstGet.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, piInstGet); // <.Property <*
                         getGen.EmitConvertOrWrap(piInstGet.ReturnType);
@@ -667,7 +675,7 @@
                         var parameterInfos = piInstSet.GetParameters();
                         for (int i = 0; i < parameterInfos.Length; i++)
                         {
-                            if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) setGen.EmitConvertOrUnwrap(i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
+                            setGen.EmitConvertOrUnwrap(i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
                         }
                         setGen.Emit(piInstSet.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, piInstSet); // <.Property = <*
                         setGen.Emit(OpCodes.Ret);
@@ -696,7 +704,7 @@
                     ParameterInfo[] parameterInfos = eiAdd.GetParameters();
                     for (int i = 0; i < parameterInfos.Length; i++)
                     {
-                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) ilAdd.EmitConvertOrUnwrap(i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
+                        ilAdd.EmitConvertOrUnwrap(i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
                     }
 
                     ilAdd.Emit(eiAdd.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, eiAdd);
@@ -714,8 +722,9 @@
                     parameterInfos = eiRemove.GetParameters();
                     for (int i = 0; i < parameterInfos.Length; i++)
                     {
-                        if (!Attribute.IsDefined(parameterInfos[i], typeof(ParamArrayAttribute))) ilRemove.EmitConvertOrUnwrap(i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
+                        ilRemove.EmitConvertOrUnwrap(i, fieldCreator.ExposerInstance, parameterInfos[i].ParameterType);
                     }
+
                     ilRemove.Emit(eiRemove.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, eiRemove);
                     ilRemove.Emit(OpCodes.Ret);
                 }
