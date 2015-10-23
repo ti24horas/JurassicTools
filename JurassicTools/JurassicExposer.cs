@@ -188,7 +188,7 @@
 
         public object ConvertOrWrapObject(object instance)
         {
-            if (instance == null) return Undefined.Value;
+            if (instance == null) return null;
             //if (instance == null) return engine.Object.InstancePrototype;
             Type type = instance.GetType();
             if (type == typeof(void)) return null;
@@ -324,7 +324,7 @@
 
         public object ConvertOrUnwrapObject(object instance, Type type)
         {
-            if (instance == null) return Null.Value;
+            if (instance == null) return null;
             //Type type = instance.GetType();
             if (type == typeof(void)) return null;
             if (instance is ConcatenatedString)
