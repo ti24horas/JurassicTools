@@ -16,10 +16,11 @@ namespace Tests
       engine.EnableDebugging = true;
       engine.ForceStrictMode = true;
 
-      JurassicExposer.RegisterInfos(typeof(Environment), new JurassicInfo("UserName", new JSPropertyAttribute()));
-      JurassicExposer.ExposeClass(typeof(Environment), engine);
+        var exposer = new JurassicExposer(engine);
+        
+        exposer.ExposeClass(typeof(Environment), engine);
       
-      JurassicExposer.ExposeFunction(engine, new Action<string>(Console.WriteLine), "log");
+      //JurassicExposer.ExposeFunction(engine, new Action<string>(Console.WriteLine), "log");
 
       engine.ExecuteFile("test.js");
     }
