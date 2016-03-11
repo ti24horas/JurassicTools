@@ -68,32 +68,8 @@ namespace JurassicTools
 
     public static void CopyCustomAttributesFrom(this PropertyBuilder builder, PropertyInfo info, params Attribute[] additionalAttributes)
     {
-      foreach (CustomAttributeData customAttributeData in info.GetCustomAttributesData())
-      {
-        try
-        {
-          builder.SetCustomAttribute(customAttributeData.GetAttributeCopy());
-        }
-        catch (Exception)
-        {
-        }
-      }
-      foreach (Attribute additionalAttribute in additionalAttributes)
-      {
-        try
-        {
-          Type attributeType = additionalAttribute.GetType();
-          PropertyInfo[] properties = attributeType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-          FieldInfo[] fields = attributeType.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-          CustomAttributeBuilder cab = new CustomAttributeBuilder(attributeType.GetConstructors()[0], new object[0], properties,
-                                                                  properties.Select(p => p.GetValue(additionalAttribute, null)).ToArray(), fields,
-                                                                  fields.Select(f => f.GetValue(additionalAttribute)).ToArray());
-          builder.SetCustomAttribute(cab);
-        }
-        catch (Exception)
-        {
-        }
-      }
+      builder.CopyAttributes(info.GetCustomAttributesData().ToArray());
+      builder.CopyAttributes(additionalAttributes);
     }
 
     public static void CopyCustomAttributesFrom(this ParameterBuilder builder, ParameterInfo info, params Attribute[] additionalAttributes)

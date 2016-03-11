@@ -284,5 +284,52 @@
             throw new ArgumentException("unkown type for unwrap: " + type.FullName);
         }
 
+        internal static void CopyAttributes(this PropertyBuilder builder, params Attribute[] additionalAttributes)
+        {
+            foreach (var additionalAttribute in additionalAttributes)
+            {
+                try
+                {
+                    var attributeType = additionalAttribute.GetType();
+                    var properties = attributeType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                    var fields = attributeType.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                    var cab = new CustomAttributeBuilder(
+                        attributeType.GetConstructors()[0],
+                        new object[0],
+                        properties,
+                        properties.Select(p => p.GetValue(additionalAttribute, null)).ToArray(),
+                        fields,
+                        fields.Select(f => f.GetValue(additionalAttribute)).ToArray());
+                    builder.SetCustomAttribute(cab);
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        internal static void CopyAttributes(this PropertyBuilder builder, params CustomAttributeData[] additionalAttributes)
+        {
+            foreach (var additionalAttribute in additionalAttributes)
+            {
+                try
+                {
+                    var attributeType = additionalAttribute.GetType();
+                    var properties = attributeType.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                    var fields = attributeType.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+                    var cab = new CustomAttributeBuilder(
+                        attributeType.GetConstructors()[0],
+                        new object[0],
+                        properties,
+                        properties.Select(p => p.GetValue(additionalAttribute, null)).ToArray(),
+                        fields,
+                        fields.Select(f => f.GetValue(additionalAttribute)).ToArray());
+                    builder.SetCustomAttribute(cab);
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
     }
 }
